@@ -2,8 +2,8 @@ import json
 import tempfile
 import os
 
-from config import Configs
-from drawing import Drawing
+from .config import Configs
+from .drawing import Drawing
 
 import cv2
 import roboflow
