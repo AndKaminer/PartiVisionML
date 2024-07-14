@@ -1,4 +1,4 @@
-from golgi.annotation import AnnotatedImage, ImageAnnotater
+from golgi.annotation import AnnotatedImage, AutoAnnotater
 
 import argparse
 import os
@@ -6,15 +6,16 @@ import os
 import easygui
 import cv2
 
-
 RESIZE_CONSTANT = 3
 
 if __name__ == '__main__':
     
     parser = argparse.ArgumentParser()
     parser.add_argument('--filename', required=False)
+    parser.add_argument('--key', required=False)
 
     filename = parser.parse_args().filename
+    key = parser.parse_args().key
 
     if not filename:
         filename = easygui.fileopenbox()
@@ -27,14 +28,11 @@ if __name__ == '__main__':
 
     img = cv2.imread(filename)
 
-    ann = ImageAnnotater(img, RESIZE_CONSTANT)
+    auto_ann = AutoAnnotater(resize_constant=RESIZE_CONSTANT,
+                             model_repo_id="gt-sulchek-lab/cell-tracking",
+                             model_filename="june20weights.pt",
+                             key=key)
 
-    ann_img = ann.annotate()
+    ann = auto_ann.annotate(img)
 
-    ann_img = ann_img.get_resized_image(400, 50)
-
-    ann_img.show()
-
-    ann_img.roboflow_upload(
-        workspace="cv-time",
-        project="final-dataset-idfeu")
+    ann.show()

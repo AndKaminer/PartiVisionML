@@ -59,7 +59,9 @@ class AnnotatedImage:
 
         return image
 
-    def roboflow_upload(self, api_key, workspace, project):
+    def roboflow_upload(self, workspace, project, api_key=None):
+        if api_key is None:
+            api_key = input("Please input your roboflow api key here: ")
         rf = roboflow.Roboflow(api_key=api_key)
         project = rf.workspace(workspace).project(project)
 
@@ -100,15 +102,14 @@ class AnnotatedImage:
             new_ctr = []
             for i in range(len(seg)):
                 if i % 2 == 0:
-                    print(seg[i], newLeft, offset)
-                    new_ctr.append(seg[i] - newLeft - offset)
+                    #new_ctr.append(seg[i] - newLeft - offset) # not sure why this is broken now
+                    new_ctr.append(seg[i] - newLeft)
                 else:
                     new_ctr.append(seg[i])
         else:
             new_ctr = None
 
         new_ctr = AnnotatedImage.coco_to_opencv(new_ctr)
-
 
         new_img = self.img[:, newLeft:newRight]
         mask = np.zeros(new_img.shape, np.uint8)
@@ -239,7 +240,6 @@ class ImageAnnotater:
     def _get_prepared_image(self, image):
         shape = image.shape
         image = cv2.resize(image, (shape[1] * self.resize_constant, shape[0] * self.resize_constant), cv2.INTER_NEAREST)
-
         imgray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
         return imgray
