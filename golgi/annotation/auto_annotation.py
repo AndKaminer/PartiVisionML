@@ -2,11 +2,13 @@ from .image_annotation import AnnotatedImage, ImageAnnotater, Drawing
 
 import tempfile
 import os
+import time
 
 import huggingface_hub
 from ultralytics import YOLO
 import numpy as np
 import cv2
+import boto3
 
 
 class ImageAutoAnnotater(ImageAnnotater):
@@ -25,7 +27,7 @@ class ImageAutoAnnotater(ImageAnnotater):
     def auto_annotate(self, prepared_image, xmin, xmax, ymin, ymax):
         window = prepared_image[ymin:ymax, xmin:xmax, :]
 
-        results = self.model(window, max_det=1, verbose=False)
+        results = self.model(window)
 
         window = cv2.cvtColor(window, cv2.COLOR_BGR2GRAY)
 
@@ -56,20 +58,29 @@ class ImageAutoAnnotater(ImageAnnotater):
 
 
 class AutoAnnotater:
-    def __init__(self, resize_constant, model_repo_id, model_filename, key=None):
-        if key is not None:
-            huggingface_hub.login(token=key)
-        else:
-            huggingface_hub.login()
-
+    def __init__(self, resize_constant, endpoint_name, access_key, secret_key):
         self.resize_constant = resize_constant
-        tempdir = tempfile.TemporaryDirectory()
-        huggingface_hub.hf_hub_download(repo_id=model_repo_id,
-                                        local_dir=tempdir.name,
-                                        filename=model_filename)
-
-        self.model = YOLO(os.path.join(tempdir.name, model_filename))
-        del tempdir
+        self.model = Model(endpoint_name, access_key, secret_key)
 
     def annotate(self, image):
         return ImageAutoAnnotater(image, self.resize_constant, self.model).annotate()
+
+class Model:
+    def __init__(self, endpoint_name, access_key, secret_key):
+        self.endpoint_name = endpoint_name
+        self.sagemaker_client = boto3.client("sagemaker-runtime",
+                                             aws_access_key_id=access_key,
+                                             aws_secret_access_key=secret_key,
+                                             region_name="us-east-1")
+
+    def __call__(self, image: AnnotatedImage):
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            file = os.path.join(tmpdirname, "image.jpg")
+            cv2.imwrite(file, image)
+            with open(file, "rb") as f:
+                payload = f.read()
+            out = self.sagemaker_client.invoke_endpoint(EndpointName=self.endpoint_name,
+                                                        ContentType="application/x-image",
+                                                        Body=payload)
+            print(out)
+            return out

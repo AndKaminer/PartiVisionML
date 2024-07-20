@@ -12,10 +12,10 @@ if __name__ == '__main__':
     
     parser = argparse.ArgumentParser()
     parser.add_argument('--filename', required=False)
-    parser.add_argument('--key', required=False)
+    parser.add_argument('--endpoint', required=True)
 
     filename = parser.parse_args().filename
-    key = parser.parse_args().key
+    endpoint_name = parser.parse_args().endpoint
 
     if not filename:
         filename = easygui.fileopenbox()
@@ -29,9 +29,9 @@ if __name__ == '__main__':
     img = cv2.imread(filename)
 
     auto_ann = AutoAnnotater(resize_constant=RESIZE_CONSTANT,
-                             model_repo_id="gt-sulchek-lab/cell-tracking",
-                             model_filename="june20weights.pt",
-                             key=key)
+                             endpoint_name=endpoint_name,
+                             access_key=os.environ["ACCESS_KEY"],
+                             secret_key=os.environ["SECRET_KEY"])
 
     ann = auto_ann.annotate(img)
 
