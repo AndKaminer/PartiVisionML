@@ -69,7 +69,8 @@ if __name__ == '__main__':
             sagemaker_session=sagemaker_session,
             role=response['Role']['Arn'])
 
-    INSTANCE_TYPE = 'ml.g4dn.xlarge'
+    # INSTANCE_TYPE = 'ml.g4dn.xlarge'
+    INSTANCE_TYPE = 'ml.g5.xlarge'
     ENDPOINT_NAME = 'yolov8-pytorch-' + str(datetime.datetime.utcnow().strftime('%Y-%m-%d-%H-%M-%S-%f'))
 
     predictor = model.deploy(initial_instance_count=1,

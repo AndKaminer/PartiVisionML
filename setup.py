@@ -10,6 +10,7 @@ setup(
         'roboflow',
         'easygui',
         'huggingface_hub',
-        'ultralytics'
+        'ultralytics',
+        'diplib'
     ]
 )

@@ -13,8 +13,10 @@ if __name__ == '__main__':
     
     parser = argparse.ArgumentParser()
     parser.add_argument('--filename', required=False)
+    parser.add_argument('--rfkey', required=False)
 
     filename = parser.parse_args().filename
+    api_key = parser.parse_args().rfkey
 
     if not filename:
         filename = easygui.fileopenbox()
@@ -34,7 +36,13 @@ if __name__ == '__main__':
     ann_img = ann_img.get_resized_image(400, 50)
 
     ann_img.show()
-
-    ann_img.roboflow_upload(
-        workspace="cv-time",
-        project="final-dataset-idfeu")
+    
+    if api_key:
+        ann_img.roboflow_upload(
+            workspace="cv-time",
+            project="final-dataset-idfeu",
+            api_key=api_key)
+    else:
+        ann_img.roboflow_upload(
+            workspace="cv-time",
+            project="final-dataset-idfeu")
