@@ -1,9 +1,15 @@
 from setuptools import find_packages, setup
 
 setup(
-    name="golgi",
-    version="1.0",
-    packages=find_packages(where="golgi/*"),
+    name="golgi-cell-cv",
+    version="0.2",
+    packages=find_packages(where="src"),
+    package_dir= {"": "src"},
+    package_data= {"": ["*/.gitkeep"]},
+    description="description",
+    url="https://github.com/AndKaminer/golgi",
+    author="Andrew Kaminer",
+    author_email="akaminer@gatech.edu",
     install_requires=[
         'opencv-python',
         'numpy',
@@ -12,5 +18,7 @@ setup(
         'huggingface_hub',
         'ultralytics',
         'diplib'
-    ]
+    ],
+    entry_points={
+        'console_scripts': ["golgi-train = golgi.training:main"]}
 )
