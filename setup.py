@@ -20,5 +20,8 @@ setup(
         'diplib'
     ],
     entry_points={
-        'console_scripts': ["golgi-train = golgi.training:main"]}
+        'console_scripts': ["golgi-train = golgi.training:main",
+                            "golgi-track = golgi.inference:main",
+                            "golgi-weights-list = golgi.inference:list_weights",
+                            "golgi-weights-download = golgi.inference:download_weights"]}
 )

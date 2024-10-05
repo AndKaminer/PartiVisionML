@@ -17,6 +17,13 @@ class Configs:
 
     huggingface_repo_id = "gt-sulchek-lab/cell-tracking"
 
+    framerate = 1
+    scaling_factor = 3
+    um_per_pixel = 1
+    window_width = 150
+    scatter = False
+    verbose = False
+
     def huggingface_login(token, write_permission=False):
         try:
             huggingface_hub.login(token=token, write_permission=write_permission)
