@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="golgi-cell-cv",
-    version="0.3",
+    version="0.4",
     packages=find_packages(where="src"),
     package_dir= {"": "src"},
     package_data= {"": ["*/.gitkeep"]},

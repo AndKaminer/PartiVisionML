@@ -44,8 +44,11 @@ def download_weights():
     parser = argparse.ArgumentParser()
     parser.add_argument("repo_id")
     parser.add_argument("model_name")
+    parser.add_argument("huggingface_token")
 
     args = parser.parse_args()
+
+    Configs.huggingface_login(args.huggingface_token)
 
     if WeightManager.download_model_weights(args.repo_id, args.model_name):
         print("Downloaded successfully")
