@@ -5,7 +5,7 @@ with open("README.md", "r") as f:
 
 setup(
     name="golgi-cell-cv",
-    version="0.5",
+    version="0.6",
     packages=find_packages(where="src"),
     package_dir= {"": "src"},
     package_data= {"": ["*/.gitkeep"]},
@@ -26,5 +26,6 @@ setup(
         'console_scripts': ["golgi-train = golgi.training:main",
                             "golgi-track = golgi.inference:main",
                             "golgi-weights-list = golgi.inference:list_weights",
-                            "golgi-weights-download = golgi.inference:download_weights"]}
+                            "golgi-weights-download = golgi.inference:download_weights",
+                            "golgi-annotate = golgi.annotation:main"]}
 )

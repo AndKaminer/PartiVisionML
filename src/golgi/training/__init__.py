@@ -1,2 +1,3 @@
 from .trainer import *
-from .main import main
+from .main import *
+from .configs import *
