@@ -6,6 +6,8 @@ class Configs:
     # IMAGE ANNOTATION CONFIGS
 
     current_time = time.localtime()
+
+    resize_constant = 3
     
     # info
     year = current_time.tm_year

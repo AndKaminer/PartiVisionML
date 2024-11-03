@@ -14,7 +14,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("annotation_type")
     parser.add_argument("image_path")
-    parser.add_argument("resize_constant", type=int)
     parser.add_argument("-m", "--model", required=False)
     parser.add_argument("-k", "--api_key", required=False)
 
@@ -40,10 +39,10 @@ def main():
         WeightManager.select_current_model(args.model)
 
         m = LocalModel(WeightManager.get_model())
-        ia = ImageAutoAnnotater(img, args.resize_constant, m)
+        ia = ImageAutoAnnotater(img, Configs.resize_constant, m)
 
     else:
-        ia = ImageAnnotater(img, args.resize_constant)
+        ia = ImageAnnotater(img, Configs.resize_constant)
         
     ann_img = ia.annotate()
     
