@@ -66,10 +66,6 @@ Either "auto" or "manual"
 - image_path
 Path to the image you want to annotate
 
-- resize_constant
-Factor to scale image by for improved resolution. Comes at the cost
-of approximation on scaling. Typically, use 3
-
 - --model
 The name of the model weights to use for auto annotation. Mandatory for 
 annotation_type "auto"
@@ -77,3 +73,15 @@ annotation_type "auto"
 - --api_key
 Roboflow api key. Either provide it as an argument or provide it after annotating
 image
+
+
+# Protocols
+
+## Miscellaneous Setup
+
+Upon installing the package, you will have access to the commands listed above. 
+To get things set up, you will likely want access to a computer vision model.
+
+## Automatic Annotation
+
+First, 

@@ -15,6 +15,7 @@ class DataHandler:
             "velocity": [],
             "acceleration": [],
             "circularity": [],
+            "ypos": [],
             "time": []}
 
         self.prev_data = {
@@ -24,18 +25,20 @@ class DataHandler:
             'velocity' : 0,
             'acceleration' : 0,
             'circularity' : 0,
+            'ypos': 0,
             'centerX' : None}
 
-        self.plot = UpdateablePlot(6, 3.2, 'scatter') if scatter else UpdateablePlot(6, 3.2, 'plot')
+        self.plot = UpdateablePlot(6, 3.2, 'scatter') if scatter else UpdateablePlot(7, 3.2, 'plot')
         self.plot.set_subplot_chars(0, "Area", "Time (us)", "Area (um^2)")
         self.plot.set_subplot_chars(1, "Perimeter", "Time (us)",  "Perimeter (um)")
         self.plot.set_subplot_chars(2, "Height", "Time (us)", "Height (um)")
         self.plot.set_subplot_chars(3, "Velocity", "Time (us)", "Velocity (um/s)")
         self.plot.set_subplot_chars(4, "Acceleration", "Time (us)", "Acceleration (um/s^2)")
         self.plot.set_subplot_chars(5, "Circularity", "Time (us)", "Circularity")
+        self.plot.set_subplot_chars(6, "Y Position", "Time (us)", "Y Position (um/s^2)")
 
 
-    def update_data(self, area, perimeter, height, circularity, centerX=None):
+    def update_data(self, area, perimeter, height, circularity, ypos, centerX=None):
 
         self.time += self.deltatime
         self.data['time'].append(self.time)
@@ -59,6 +62,8 @@ class DataHandler:
         self.prev_data['acceleration'] = acceleration
         self.data['circularity'].append(circularity)
         self.prev_data['circularity'] = circularity
+        self.data["ypos"].append(ypos)
+        self.prev_data{"ypos"] = ypos
         self.prev_data['centerX'] = centerX
 
         self.__update_plot()
@@ -75,3 +80,4 @@ class DataHandler:
         self.plot.update_subplot(3, self.time, self.data['velocity'][-1], .1)
         self.plot.update_subplot(4, self.time, self.data['acceleration'][-1], .1)
         self.plot.update_subplot(5, self.time, self.data['circularity'][-1], .1)
+        self.plot.update_subplot(6, self.time, self.data['ypos'][-1], .1)

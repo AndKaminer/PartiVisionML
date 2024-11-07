@@ -57,6 +57,7 @@ class InferencePipeline:
                            perimeter=img.get_parameter('perimeter'),
                            height=img.get_parameter('height'),
                            circularity=img.get_parameter('circularity'),
+                           ypos=img.get_parameter('ypos'),
                            centerX=img.get_parameter('centerX'))
 
             if img.get_contour() is not None:

@@ -21,6 +21,7 @@ class ProcessedImage:
                 'perimeter' : 0,
                 'height' : 0,
                 'circularity' : 0,
+                'ypos': 0,
                 'centerX' : None}
         
         self.contour = None
@@ -55,15 +56,16 @@ class ProcessedImage:
         if m00 != 0:
             self.data['centerX'] = int(m10 // m00)
         
-        _, _, _, h = cv2.boundingRect(contour)
+        _, y, _, h = cv2.boundingRect(contour)
 
         self.data['height'] = h * self.um_per_pixel / self.scaling_factor
+        self.data['ypos'] = (y + (h // 2)) * self.self.um_per_pixel / self.scaling_factor
 
         measurement = self.get_dip_measurement()
 
         self.data['perimeter'] = measurement['Perimeter'][1][0] * self.um_per_pixel / self.scaling_factor
         self.data['area'] = measurement['SolidArea'][1][0] * pow(self.um_per_pixel, 2) / pow(self.scaling_factor, 2)
-        self.data['circularity'] = measurement['Roundness'][1][0] 
+        self.data['circularity'] = measurement['Roundness'][1][0]
 
 
     def get_contour(self):
