@@ -63,7 +63,7 @@ class DataHandler:
         self.data['circularity'].append(circularity)
         self.prev_data['circularity'] = circularity
         self.data["ypos"].append(ypos)
-        self.prev_data{"ypos"] = ypos
+        self.prev_data["ypos"] = ypos
         self.prev_data['centerX'] = centerX
 
         self.__update_plot()
