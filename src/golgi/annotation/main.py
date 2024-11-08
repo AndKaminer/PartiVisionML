@@ -8,6 +8,7 @@ from .image_annotation import ImageAnnotater
 from .model import LocalModel
 
 from ..training import Configs
+from .config import Configs as AnnConfigs
 from ..inference import WeightManager
 
 def main():
@@ -39,10 +40,10 @@ def main():
         WeightManager.select_current_model(args.model)
 
         m = LocalModel(WeightManager.get_model())
-        ia = ImageAutoAnnotater(img, Configs.resize_constant, m)
+        ia = ImageAutoAnnotater(img, AnnConfigs.resize_constant, m)
 
     else:
-        ia = ImageAnnotater(img, Configs.resize_constant)
+        ia = ImageAnnotater(img, AnnConfigs.resize_constant)
         
     ann_img = ia.annotate()
     
