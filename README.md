@@ -1,5 +1,12 @@
 Computer Vision Package for Microfluidics. For more information, contact akaminer@gatech.edu.
 
+# Installation
+
+Set up a virtual environment using python's venv functionality. See [this](https://docs.python.org/3/library/venv.html) link. Inside the virtual environment, install the package with pip. Then, you should have access to the commands listed below.
+```
+    pip install --upgrade golgi-cell-cv
+```
+
 # Commands
 
 ## golgi-train
