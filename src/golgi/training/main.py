@@ -3,7 +3,7 @@ from .configs import Configs as TrainConfigs
 from ..inference import WeightManager
 
 
-def train_model(epochs, batch, patience, weight_destination):
+def train_model(epochs, batch, patience, weight_destination, api_key):
     """
     Train the model with the given parameters.
 
@@ -25,7 +25,8 @@ def train_model(epochs, batch, patience, weight_destination):
             WeightManager.get_model(),
             TrainConfigs.workspace_name,
             TrainConfigs.project_name,
-            TrainConfigs.version_number
+            TrainConfigs.version_number,
+            api_key
         )
 
         # Start training

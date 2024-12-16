@@ -154,11 +154,8 @@ def create_app():
         html.Div(id="download-status", style={"marginTop": "20px"}),
 
         # Training
-
-        html.H4(
-            "Training",
-            style={"fontSize": "32px", "textAlign": "center", "fontWeight": "bold"}  # Change font size here
-        ),
+        html.Hr(),
+        html.H4("Training Feature"),
         dbc.Label("Epochs:"),
         dcc.Input(
             id="epochs",
@@ -185,6 +182,13 @@ def create_app():
             id="weight-destination",
             type="text",
             placeholder="Destination folder for weights",
+            style={"width": "100%", "marginBottom": "10px"}
+        ),
+        dbc.Label("API Key:"),
+        dcc.Input(
+            id="api-key-train",
+            type="password",
+            placeholder="Enter API key",
             style={"width": "100%", "marginBottom": "10px"}
         ),
         dbc.Button("Train Model", id="train-button", color="primary", className="my-2"),
@@ -407,7 +411,16 @@ def create_app():
         State("patience", "value"),
         State("weight-destination", "value"),
     )
-    def train_callback(n_clicks, epochs, batch, patience, weight_destination):
+    @app.callback(
+        Output("training-status", "children"),
+        Input("train-button", "n_clicks"),
+        State("epochs", "value"),
+        State("batch", "value"),
+        State("patience", "value"),
+        State("weight-destination", "value"),
+        State("api-key-train", "value")
+    )
+    def train_callback(n_clicks, epochs, batch, patience, weight_destination, api_key):
         """
         Callback to handle the training process when the 'Train Model' button is clicked.
 
@@ -417,6 +430,7 @@ def create_app():
             batch (int): Batch size.
             patience (int): Patience for early stopping.
             weight_destination (str): Destination folder for weights.
+            api_key (str): API key for Roboflow authentication.
 
         Returns:
             str: Status message indicating success or error.
@@ -425,18 +439,16 @@ def create_app():
             return ""
 
         # Validate inputs
-        if not epochs or not batch or not patience or not weight_destination:
-            return "Error: All fields (epochs, batch, patience, weight destination) are required."
+        if not epochs or not batch or not patience or not weight_destination or not api_key:
+            return "Error: All fields (epochs, batch, patience, weight destination, and API key) are required."
 
         try:
-            # Call the train_model function
-            result = train_model(epochs, batch, patience, weight_destination)
+            # Call the train_model function with the API key
+            result = train_model(epochs, batch, patience, weight_destination, api_key=api_key)
             return result
         except Exception as e:
             return f"Error during training: {str(e)}"
-
     return app
-
 
 def run():
     app = create_app()

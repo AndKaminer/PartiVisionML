@@ -1,19 +1,21 @@
+import roboflow
 import tempfile
 import os
 
 
 class Trainer:
-    def __init__(self, starting_model):
+    def __init__(self, starting_model, workspace_name, project_name, version_number, api_key=None):
         self.starting_model = starting_model
         self.tempdir = tempfile.TemporaryDirectory()
         self.dataset_dir = os.path.join(self.tempdir.name, "dataset")
 
-    def initialize_dataset(self, workspace_name, project_name, version_number, api_key):
-        from roboflow import Roboflow
-        if not api_key:
-            raise ValueError("API key is required to initialize the dataset.")
+        # Login explicitly with the provided API key
+        if api_key:
+            roboflow.login(api_key=api_key)
+        else:
+            raise ValueError("API key is required to initialize Trainer.")
 
-        rf = Roboflow(api_key=api_key)
+        rf = roboflow.Roboflow()
         project = rf.workspace(workspace_name).project(project_name)
         dataset = project.version(version_number).download("yolov8", location=self.dataset_dir)
 
@@ -31,9 +33,6 @@ class Trainer:
             f.write(out)
 
     def train(self, epochs, batch, patience, weight_destination):
-        if not os.path.exists(self.dataset_dir):
-            raise ValueError("Dataset directory is not initialized. Call `initialize_dataset` first.")
-
         out = self.starting_model.train(
             data=os.path.join(self.dataset_dir, "data.yaml"),
             name="Training",
