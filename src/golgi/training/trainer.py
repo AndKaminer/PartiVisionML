@@ -11,11 +11,11 @@ class Trainer:
 
         # Login explicitly with the provided API key
         if api_key:
-            roboflow.login(api_key=api_key)
+            rf = roboflow.Roboflow(api_key=api_key)
         else:
             raise ValueError("API key is required to initialize Trainer.")
 
-        rf = roboflow.Roboflow()
+
         project = rf.workspace(workspace_name).project(project_name)
         dataset = project.version(version_number).download("yolov8", location=self.dataset_dir)
 

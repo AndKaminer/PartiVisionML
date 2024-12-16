@@ -410,14 +410,6 @@ def create_app():
         State("batch", "value"),
         State("patience", "value"),
         State("weight-destination", "value"),
-    )
-    @app.callback(
-        Output("training-status", "children"),
-        Input("train-button", "n_clicks"),
-        State("epochs", "value"),
-        State("batch", "value"),
-        State("patience", "value"),
-        State("weight-destination", "value"),
         State("api-key-train", "value")
     )
     def train_callback(n_clicks, epochs, batch, patience, weight_destination, api_key):
@@ -452,7 +444,7 @@ def create_app():
 
 def run():
     app = create_app()
-    app.run_server(debug=False)
+    app.run_server(debug=True)
 
 
 if __name__ == "__main__":
