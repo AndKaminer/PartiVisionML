@@ -20,12 +20,9 @@ setup(
         'easygui',
         'huggingface_hub',
         'ultralytics',
-        'diplib'
+        'diplib',
+        'boto3'
     ],
     entry_points={
-        'console_scripts': ["golgi-train = golgi.training:main",
-                            "golgi-track = golgi.inference:main",
-                            "golgi-weights-list = golgi.inference:list_weights",
-                            "golgi-weights-download = golgi.inference:download_weights",
-                            "golgi-annotate = golgi.annotation:main"]}
+        'console_scripts': ["golgi-app = golgi.app:main"  ]}
 )
