@@ -47,8 +47,6 @@ def main():
         
     ann_img = ia.annotate()
     
-    ann_img.show()
-    
     if "api_key" in args:
         ann_img.roboflow_upload(workspace=Configs.workspace_name,
                                 project=Configs.project_name,

@@ -59,7 +59,7 @@ class ProcessedImage:
         _, y, _, h = cv2.boundingRect(contour)
 
         self.data['height'] = h * self.um_per_pixel / self.scaling_factor
-        self.data['ypos'] = (y + (h // 2)) * self.self.um_per_pixel / self.scaling_factor
+        self.data['ypos'] = (y + (h // 2)) * self.um_per_pixel / self.scaling_factor
 
         measurement = self.get_dip_measurement()
 
