@@ -5,6 +5,7 @@ import numpy as np
 import cv2
 import diplib as dip
 
+
 class ProcessedImage:
 
     def __init__(self, frame, centerX, window_width, scaling_factor, um_per_pixel, model):
