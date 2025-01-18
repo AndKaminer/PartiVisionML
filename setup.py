@@ -21,7 +21,9 @@ setup(
         'huggingface_hub',
         'ultralytics',
         'diplib',
-        'boto3'
+        'boto3',
+        'dash',
+        'dash-bootstrap-components'
     ],
     entry_points={
         'console_scripts': ["golgi-app = golgi.app:main"  ]}
