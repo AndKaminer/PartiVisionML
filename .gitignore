@@ -171,3 +171,8 @@ cython_debug/
 /.idea/inspectionProfiles/profiles_settings.xml
 /src/golgi/weights/sep13.pt
 /.idea/vcs.xml
+
+
+# PROJECT SPECIFIC
+settings.json
+settings_path.txt

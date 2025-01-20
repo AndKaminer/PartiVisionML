@@ -1,1 +1,0 @@
-/home/andrew/repos/CELLCVLIB/golgi/src/golgi/settings.json
