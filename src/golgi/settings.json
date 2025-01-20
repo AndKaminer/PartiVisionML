@@ -1,0 +1,15 @@
+{
+    "roboflow_api_key": null,
+    "roboflow_workspace_name": null,
+    "roboflow_project_name": null,
+    "roboflow_version_number": null,
+    "huggingface_token": null,
+    "huggingface_repo_id": null,
+    "model_name": null,
+    "framerate": null,
+    "scalng_factor": null,
+    "um_per_pixel": null,
+    "window_width": null,
+    "scatter": null,
+    "verbose": null
+}
