@@ -50,9 +50,14 @@ def get_setting(setting_name):
 def get_settings_path(settings_path_path):
     try:
 
-        if not os.path.exists(settings_path_path): # if path to settings path file doesn't exist, create it with reference to the standard settings file
+        if not os.path.exists(settings_path_path): # if path to settings path file doesn't exist, create it with reference to the standard settings file (also create said standard file)
             with open(settings_path_path, "w") as f:
                 f.write(NORMAL_SETTINGS_PATH)
+
+            with open(DEFAULT_SETTINGS_PATH, "r") as default:
+                with open(NORMAL_SETTINGS_PATH, "w") as normal:
+                    temp_settings = json.load(default)
+                    normal.write(json.dumps(temp_settings, indent=4))
 
         with open(settings_path_path, "r") as f:
             settings_path = f.read()
