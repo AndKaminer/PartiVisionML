@@ -1,451 +1,641 @@
+import os
+import glob
+import uuid
+import time
+import math
+import base64
+import cv2
+import numpy as np
+import pandas as pd
+from huggingface_hub import hf_hub_download
+from roboflow import Roboflow
 
 import dash
-from dash import Dash, dcc, html, Input, Output, State
 import dash_bootstrap_components as dbc
-import os
-import cv2
-import base64
-from golgi.inference.main import get_available_weights, download_model, main
-from golgi.annotation.main import annotate_image  # Refactored annotation function
-from golgi.training.main import train_model
+from dash import dcc, html, Input, Output, State, no_update
+from dash.exceptions import PreventUpdate
 
-UPLOAD_FOLDER = "uploads"
-FRAME_FOLDER = "frames"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(FRAME_FOLDER, exist_ok=True)
-
-# Global variables for frame navigation
-frame_paths = []
-current_frame_index = 0
+# Dash Canvas for annotation
+from dash_canvas import DashCanvas
+from dash_canvas.utils import parse_jsonstring
 
 
-def create_app():
+#
+# ---------------------------------------------------------------------
+# 1) HELPER FUNCTIONS
+# ---------------------------------------------------------------------
+#
+def background_subtraction(video_path, output_path=None):
     """
-    Create and configure the Dash app.
-
-    Returns:
-        app (Dash): The Dash app instance.
+    Example background subtraction using OpenCV MOG2.
+    Replace with your real script if needed.
     """
-    app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+    if output_path is None:
+        output_path = os.path.splitext(video_path)[0] + "_bg_sub.avi"
 
-    app.scripts.config.serve_locally = True
-    app.css.config.serve_locally = True
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise FileNotFoundError(f"Cannot open video: {video_path}")
+
+    fgbg = cv2.createBackgroundSubtractorMOG2(history=500, detectShadows=False)
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    out = cv2.VideoWriter(output_path, fourcc, fps, (w, h), False)  # grayscale
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        fgmask = fgbg.apply(frame)
+        out.write(fgmask)
+    cap.release()
+    out.release()
+    return output_path
+
+def load_hf_model(repo_id, filename, token):
+    """
+    Download a model file (.pt) from Hugging Face.
+    """
+    downloaded_path = hf_hub_download(repo_id=repo_id, filename=filename, token=token)
+    return downloaded_path
+
+def autodetect_particles_in_video(video_path, model_path, output_csv_path=None):
+    """
+    Mock function for detection. Replace with your real model inference code.
+    """
+    if output_csv_path is None:
+        output_csv_path = os.path.splitext(video_path)[0] + "_detections.csv"
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise FileNotFoundError(f"Cannot open video for autodetection: {video_path}")
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    detections = []
+    for f_idx in range(frame_count):
+        ret, frame = cap.read()
+        if not ret:
+            break
+        # Example: Single bounding box in center
+        h, w = frame.shape[:2]
+        box_w, box_h = 50, 50
+        x = (w - box_w) // 2
+        y = (h - box_h) // 2
+        detections.append([f_idx, x, y, box_w, box_h])
+
+    cap.release()
+    df = pd.DataFrame(detections, columns=['frame_idx', 'x', 'y', 'w', 'h'])
+    df.to_csv(output_csv_path, index=False)
+    return output_csv_path
+
+def train_model(api_key, hf_repo_id, hf_token, selected_weight, epochs, batch_size, patience):
+    """
+    Mock training routine. Replace with your real training code.
+    """
+    time.sleep(1)  # pretend training
+    msg = (f"Training (mock) with epochs={epochs}, batch_size={batch_size}, "
+           f"patience={patience}. Base model: {selected_weight}.")
+    return msg
+
+def upload_annotation_to_roboflow(api_key, workspace, project_name, image_path):
+    """
+    Upload an annotated image to your Roboflow project.
+    """
+    rf = Roboflow(api_key=api_key)
+    proj = rf.workspace(workspace).project(project_name)
+    upload_info = proj.upload(image_path)
+    return upload_info
+
+def base64_encode_image(raw_bytes):
+    return base64.b64encode(raw_bytes).decode('utf-8')
+
+def measure_particle_properties(cnt):
+    """
+    Return dict with area, perimeter, bounding-box height, circularity, etc.
+    """
+    area = cv2.contourArea(cnt)
+    perimeter = cv2.arcLength(cnt, True)
+    x, y, w, h = cv2.boundingRect(cnt)
+    circularity = 4 * math.pi * (area / ((perimeter + 1e-8) ** 2))
+
+    return {
+        'area': area,
+        'height': h,
+        'perimeter': perimeter,
+        'circularity': circularity
+    }
+
+def track_video(video_path, model_path, fps, export_csv=False, export_avi=False):
+    """
+    Example "tracking" function:
+      1) Background subtract
+      2) Find largest contour
+      3) Save CSV + annotated AVI
+    """
+    # BG-sub
+    bg_sub_video_path = background_subtraction(video_path)
+
+    cap = cv2.VideoCapture(bg_sub_video_path)
+    if not cap.isOpened():
+        raise FileNotFoundError(f"Could not open BG-subtracted video: {bg_sub_video_path}")
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    if export_avi:
+        fourcc = cv2.VideoWriter_fourcc(*'XVID')
+        out_avi_path = os.path.splitext(video_path)[0] + "_tracked.avi"
+        out_avi = cv2.VideoWriter(out_avi_path, fourcc, fps, (width, height))
+
+    rows = []
+    prev_center = None
+    prev_velocity = 0
+
+    for f_idx in range(frame_count):
+        ret, frame = cap.read()
+        if not ret:
+            break
+        # threshold
+        _, thresh = cv2.threshold(frame, 30, 255, cv2.THRESH_BINARY)
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if contours:
+            cnt = max(contours, key=cv2.contourArea)
+            props = measure_particle_properties(cnt)
+            M = cv2.moments(cnt)
+            cx = int(M["m10"] / (M["m00"] + 1e-8))
+            cy = int(M["m01"] / (M["m00"] + 1e-8))
+
+            # velocity, acceleration
+            if prev_center is not None:
+                dist = math.hypot(cx - prev_center[0], cy - prev_center[1])
+                velocity = dist * fps
+                acceleration = (velocity - prev_velocity) * fps
+            else:
+                velocity = 0
+                acceleration = 0
+
+            row = {
+                'frame': f_idx,
+                'time': f_idx / fps,
+                'x': cx,
+                'y': cy,
+                'area': props['area'],
+                'height': props['height'],
+                'perimeter': props['perimeter'],
+                'circularity': props['circularity'],
+                'velocity': velocity,
+                'acceleration': acceleration,
+            }
+            rows.append(row)
+
+            prev_center = (cx, cy)
+            prev_velocity = velocity
+
+            if export_avi:
+                color_frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+                cv2.drawContours(color_frame, [cnt], -1, (0, 0, 255), 2)
+                cv2.circle(color_frame, (cx, cy), 5, (255, 0, 0), -1)
+                out_avi.write(color_frame)
+        else:
+            if export_avi:
+                out_avi.write(cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR))
+
+    cap.release()
+    if export_avi:
+        out_avi.release()
+
+    if export_csv:
+        df = pd.DataFrame(rows)
+        csv_out_path = os.path.splitext(video_path)[0] + "_tracked.csv"
+        df.to_csv(csv_out_path, index=False)
+
+    return True
 
 
+#
+# ---------------------------------------------------------------------
+# 2) APP LAYOUT
+# ---------------------------------------------------------------------
+#
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
-    # Define app layout
-    app.layout = dbc.Container([
-        html.H1("Golgi Management Dashboard", className="my-4"),
+app.layout = dbc.Container([
+    dcc.Store(id='stored-roboflow-api-key'),
+    dcc.Store(id='stored-hf-repo-id'),
+    dcc.Store(id='stored-hf-token'),
+    dcc.Store(id='stored-selected-weight'),
+    dcc.Store(id='stored-training-params'),
+    dcc.Store(id='uploaded-training-video-path'),
 
-        # Video Upload Section
+    html.H1("Cell Tracking Interface"),
 
+    dbc.Row([
+        #
+        # SETTINGS
+        #
+        dbc.Col([
+            html.H3("Settings", className="text-primary mt-3"),
 
-        html.H4(
-            "Annotation",
-            style={"fontSize": "32px", "textAlign": "center", "fontWeight": "bold"}  # Change font size here
-        ),
-        dbc.Label("Upload Video (.avi):"),
-        dcc.Upload(
-            id="upload-video",
-            children=html.Button("Upload Video"),
-            accept=".avi",
-            style={"width": "100%", "padding": "10px", "textAlign": "center", "border": "1px dashed"}
-        ),
-        html.Div(id="upload-status", style={"marginTop": "30px"}),
+            html.H6("Roboflow Credentials"),
+            dbc.InputGroup([
+                dbc.Input(id="roboflow_api_key", type="text", placeholder="Roboflow API Key"),
+                dbc.Button("Load", id="load_roboflow_key", color="primary")
+            ], className="mb-2"),
+            html.Div(id="roboflow_status", className="text-secondary mb-3"),
 
-        # Frame Navigation Section
-        html.H4("Navigate Frames"),
-        html.Div([
-            html.Div(id="frame-number", style={"marginBottom": "10px"}),
+            html.H6("Hugging Face Credentials"),
+            dbc.InputGroup([
+                dbc.Input(id="hf_repo_id", type="text", placeholder="Repo ID"),
+                dbc.Input(id="hf_token", type="text", placeholder="HF Token"),
+                dbc.Button("Load HF", id="load_hf_token", color="primary")
+            ], className="mb-2"),
+            html.Div(id="huggingface_status", className="text-secondary mb-3"),
 
-            # Manual Input for Frame Number
-            dbc.Label("Go to Frame:"),
-            dcc.Input(
-                id="frame-input",
-                type="number",
-                placeholder="Enter frame number",
-                style={"width": "100%", "marginBottom": "10px"}
+            html.H6("Select Model Weight"),
+            dcc.Dropdown(
+                id="hf_model_weights_dropdown",
+                options=[],
+                placeholder="No weights loaded yet",
+                className="mb-2"
+            ),
+            html.Div(id="model_weight_status", className="text-secondary mb-3"),
+
+            html.H6("Training Params"),
+            dbc.InputGroup([
+                dbc.Input(id="training_epochs", type="number", placeholder="epochs"),
+                dbc.Input(id="training_batch", type="number", placeholder="batch size"),
+                dbc.Input(id="training_patience", type="number", placeholder="patience"),
+                dbc.Button("Set Params", id="load_training_params", color="primary")
+            ], className="mb-2"),
+            html.Div(id="training_params_status", className="text-secondary mb-3"),
+        ], width=3),
+
+        #
+        # TRAINING
+        #
+        dbc.Col([
+            html.H3("Training", className="text-primary mt-3"),
+
+            html.H6("Upload Training Video"),
+            dcc.Upload(
+                id="upload_training_video",
+                children=html.Div(["Drag & Drop or Click to Select Video"]),
+                style={
+                    "width": "100%",
+                    "height": "60px",
+                    "lineHeight": "60px",
+                    "borderWidth": "1px",
+                    "borderStyle": "dashed",
+                    "borderRadius": "5px",
+                    "textAlign": "center",
+                    "marginBottom": "10px",
+                },
+                multiple=False
+            ),
+            html.Div(id="video_upload_status", className="text-warning mb-3"),  # <--- New for upload messages
+
+            dbc.Button("Apply Autodetection", id="apply_autodetection_btn", color="info", className="mb-2"),
+            html.Div(id="autodetection_status", className="text-warning mb-3"),
+
+            # Annotation
+            html.H5("Annotation"),
+            dbc.InputGroup([
+                dbc.Input(id="annotation_frame_number", type="number", placeholder="Frame #"),
+                dbc.Button("Load Frame", id="annotation_load_frame_btn", color="secondary")
+            ], className="mb-2"),
+            dcc.Slider(
+                id="annotation_frame_slider",
+                min=0, max=0, step=1, value=0,
+                marks=None,
+                tooltip={"always_visible": True},
+                className="mb-2"
             ),
 
-            # Arrow Buttons
-            dbc.Button("< Previous", id="back-button", color="primary", className="me-2"),
-            dbc.Button("Next >", id="forward-button", color="primary"),
-        ], style={"textAlign": "center", "marginBottom": "20px"}),
+            DashCanvas(
+                id='annotation_canvas',
+                width=480,
+                height=360,
+                lineWidth=2,
+                goButtonTitle='Annotate',
+                tool='rectangle',
+                filename='',
+                hide_buttons=['zoom', 'pan', 'line', 'pencil', 'select']
+            ),
+            dbc.Button("Save Annotation", id="save_annotation_btn", color="success", className="my-2"),
+            html.Div(id="annotation_save_status", className="text-success mb-3"),
 
-        # Frame Display Section
-        html.Div(id="frame-display", style={"textAlign": "center", "marginBottom": "20px"}),
+            dbc.Button("Train Model", id="train_model_btn", color="danger", className="mb-2"),
+            html.Div(id="training_status", className="text-info mb-2"),
 
-        # Annotation Section
-        html.H4("Annotate Frame"),
-        dbc.Label("Annotation Type:"),
-        dcc.Dropdown(
-            id="annotation-type",
-            options=[
-                {"label": "Auto", "value": "auto"},
-                {"label": "Manual", "value": "manual"}
-            ],
-            placeholder="Select annotation type"
-        ),
-        dbc.Label("Model Name:"),
-        dcc.Input(id="model-name", type="text", placeholder="Enter model name"),
-        dbc.Label("API Key: "),
-        dcc.Input(id="api-key", type="text", placeholder="Enter API key"),
-        dbc.Button("Annotate Frame", id="annotate-button", color="primary", className="my-2"),
-        html.Div(id="annotation-status", style={"marginTop": "20px"}),
+        ], width=5),
 
-        # Tracking Section
+        #
+        # TRACKING
+        #
+        dbc.Col([
+            html.H3("Tracking", className="text-primary mt-3"),
 
-        html.H4(
-            "Tracking",
-            style={"fontSize": "32px", "textAlign": "center", "fontWeight": "bold"}  # Change font size here
-        ),
-        dbc.Label("Video File Path (.avi):"),
-        dcc.Input(
-            id="video-path",
-            type="text",
-            placeholder="Enter the full path to the .avi file",
-            style={"width": "100%", "marginBottom": "10px"}
-        ),
-        dbc.Label("Output Folder:"),
-        dcc.Input(
-            id="output-folder",
-            type="text",
-            placeholder="Enter the output folder path",
-            style={"width": "100%", "marginBottom": "10px"}
-        ),
-        dbc.Label("Weight Name:"),
-        dcc.Dropdown(
-            id="weight-name-tracking",
-            options=[{"label": weight, "value": weight} for weight in get_available_weights()],
-            placeholder="Select a weight name",
-            style={"width": "100%", "marginBottom": "10px"}
-        ),
-        dbc.Button("Run Tracking", id="run-tracking-button", color="primary", className="my-2"),
-        html.Div(id="tracking-status", style={"marginTop": "20px"}),
+            dbc.InputGroup([
+                dbc.Input(id="tracking_folder_path", placeholder="Folder containing videos"),
+                dbc.Button("Set Folder", id="set_folder_btn", color="primary")
+            ], className="mb-2"),
 
-        # Weight Management Section
-        html.Hr(),
-        html.H4("Weight Management"),
-        dbc.Button("List Available Weights", id="list-weights-button", color="primary", className="my-2"),
-        html.Div(id="weights-list", style={"marginTop": "30px"}),
+            dbc.InputGroup([
+                dbc.Input(id="tracking_frame_rate", type="number", placeholder="Frame Rate"),
+                dbc.Button("Set Rate", id="set_frame_rate_btn", color="primary")
+            ], className="mb-2"),
 
-        dbc.Label("Repository ID:"),
-        dcc.Input(
-            id="repo-id",
-            type="text",
-            placeholder="Enter the Huggingface repository ID",
-            style={"width": "100%", "marginBottom": "10px"}
-        ),
-        dbc.Label("Model Name:"),
-        dcc.Input(
-            id="model-name-download",
-            type="text",
-            placeholder="Enter the model name",
-            style={"width": "100%", "marginBottom": "10px"}
-        ),
-        dbc.Label("Huggingface Token:"),
-        dcc.Input(
-            id="huggingface-token",
-            type="password",
-            placeholder="Enter your Huggingface token",
-            style={"width": "100%", "marginBottom": "10px"}
-        ),
-        dbc.Button("Download Model", id="download-weights-button", color="primary", className="my-2"),
-        html.Div(id="download-status", style={"marginTop": "20px"}),
+            dbc.Label("Export Options:", className="mt-2"),
+            dbc.Checklist(
+                options=[
+                    {"label": "CSV of Raw Data", "value": "csv"},
+                    {"label": "AVI Video w/ Tracking", "value": "avi"},
+                ],
+                value=["csv"],
+                id="export_file_types",
+                inline=True,
+                className="mb-3"
+            ),
 
-        # Training
-        html.Hr(),
-        html.H4("Training Feature"),
-        dbc.Label("Epochs:"),
-        dcc.Input(
-            id="epochs",
-            type="number",
-            placeholder="Number of epochs",
-            style={"width": "100%", "marginBottom": "10px"}
-        ),
-        dbc.Label("Batch Size:"),
-        dcc.Input(
-            id="batch",
-            type="number",
-            placeholder="Batch size",
-            style={"width": "100%", "marginBottom": "10px"}
-        ),
-        dbc.Label("Patience:"),
-        dcc.Input(
-            id="patience",
-            type="number",
-            placeholder="Patience for early stopping",
-            style={"width": "100%", "marginBottom": "10px"}
-        ),
-        dbc.Label("Weight Destination:"),
-        dcc.Input(
-            id="weight-destination",
-            type="text",
-            placeholder="Destination folder for weights",
-            style={"width": "100%", "marginBottom": "10px"}
-        ),
-        dbc.Label("API Key:"),
-        dcc.Input(
-            id="api-key-train",
-            type="password",
-            placeholder="Enter API key",
-            style={"width": "100%", "marginBottom": "10px"}
-        ),
-        dbc.Button("Train Model", id="train-button", color="primary", className="my-2"),
-        html.Div(id="training-status", style={"marginTop": "20px"}),
+            dbc.Button("Run Tracking", id="run_tracking_btn", color="warning", className="mb-2"),
 
+            dbc.Progress(
+                id="tracking_progress_bar",
+                value=0,
+                striped=True,
+                animated=True,
+                style={"height": "20px"},
+                className="mb-2"
+            ),
+
+            html.Div(id="tracking_status", className="text-primary"),
+        ], width=4)
     ])
+], fluid=True)
 
-    # Callbacks
-    @app.callback(
-        Output("weights-list", "children"),
-        Input("list-weights-button", "n_clicks")
-    )
-    def list_weights(n_clicks):
-        if not n_clicks:
-            return ""
+#
+# ---------------------------------------------------------------------
+# 3) CALLBACKS
+# ---------------------------------------------------------------------
+#
+
+#
+# ====== SETTINGS ======
+#
+@app.callback(
+    Output("stored-roboflow-api-key", "data"),
+    Output("roboflow_status", "children"),
+    Input("load_roboflow_key", "n_clicks"),
+    State("roboflow_api_key", "value"),
+    prevent_initial_call=True
+)
+def store_roboflow_key(n_clicks, rf_key):
+    if not rf_key:
+        return no_update, "No Roboflow API key entered."
+    return rf_key, f"Roboflow key loaded: {rf_key[:10]}..."
+
+@app.callback(
+    Output("stored-hf-repo-id", "data"),
+    Output("stored-hf-token", "data"),
+    Output("hf_model_weights_dropdown", "options"),
+    Output("huggingface_status", "children"),
+    Input("load_hf_token", "n_clicks"),
+    State("hf_repo_id", "value"),
+    State("hf_token", "value"),
+    prevent_initial_call=True
+)
+def store_hf_creds(n_clicks, repo_id, token):
+    if not repo_id or not token:
+        return no_update, no_update, no_update, "Enter valid Hugging Face info."
+    # Known model "sep13.pt", for example
+    model_list = [{"label": "sep13.pt", "value": "sep13.pt"}]
+    msg = f"Hugging Face creds loaded. Found {len(model_list)} weight(s)."
+    return repo_id, token, model_list, msg
+
+@app.callback(
+    Output("stored-selected-weight", "data"),
+    Output("model_weight_status", "children"),
+    Input("hf_model_weights_dropdown", "value"),
+    State("stored-hf-repo-id", "data"),
+    State("stored-hf-token", "data"),
+    prevent_initial_call=True
+)
+def select_model_weight(weight_filename, repo_id, token):
+    if not weight_filename:
+        raise PreventUpdate
+    try:
+        downloaded_path = load_hf_model(repo_id, weight_filename, token)
+        msg = f"Selected weight: {weight_filename}, downloaded to {downloaded_path}."
+        return weight_filename, msg
+    except Exception as e:
+        return no_update, f"Error downloading model: {str(e)}"
+
+@app.callback(
+    Output("stored-training-params", "data"),
+    Output("training_params_status", "children"),
+    Input("load_training_params", "n_clicks"),
+    State("training_epochs", "value"),
+    State("training_batch", "value"),
+    State("training_patience", "value"),
+    prevent_initial_call=True
+)
+def store_training_params(n_clicks, epochs, batch_size, patience):
+    if not epochs or not batch_size or not patience:
+        return no_update, "Incomplete training parameters."
+    params = {"epochs": epochs, "batch_size": batch_size, "patience": patience}
+    return params, f"Training params set: {params}"
+
+#
+# ====== TRAINING ======
+#
+
+# 1) Upload training video
+@app.callback(
+    Output("uploaded-training-video-path", "data"),
+    Output("video_upload_status", "children"),  # <-- replaced autodetection_status to avoid duplication
+    Input("upload_training_video", "contents"),
+    State("upload_training_video", "filename"),
+    prevent_initial_call=True
+)
+def on_training_video_upload(contents, filename):
+    if not contents:
+        raise PreventUpdate
+    # decode base64
+    content_type, content_string = contents.split(",", 1)
+    decoded = base64.b64decode(content_string)
+
+    unique_name = f"training_{uuid.uuid4().hex}_{filename}"
+    with open(unique_name, "wb") as f:
+        f.write(decoded)
+
+    return unique_name, f"Uploaded training video: {filename}"
+
+# 2) Apply autodetection
+@app.callback(
+    Output("autodetection_status", "children"),
+    Input("apply_autodetection_btn", "n_clicks"),
+    State("uploaded-training-video-path", "data"),
+    State("stored-selected-weight", "data"),
+    prevent_initial_call=True
+)
+def autodetect_btn_clicked(n_clicks, video_path, model_weight):
+    if not video_path:
+        return "No video to process for autodetection."
+    if not model_weight:
+        return "No model weight selected."
+
+    try:
+        bg_sub_path = background_subtraction(video_path)
+        out_csv = autodetect_particles_in_video(bg_sub_path, model_weight)
+        return f"Autodetection complete. Results in {out_csv}"
+    except Exception as e:
+        return f"Autodetection error: {str(e)}"
+
+# 3) Load frame for annotation
+@app.callback(
+    Output("annotation_canvas", "image_content"),
+    Output("annotation_frame_slider", "max"),
+    Output("annotation_frame_slider", "value"),
+    Input("annotation_load_frame_btn", "n_clicks"),
+    State("uploaded-training-video-path", "data"),
+    State("annotation_frame_number", "value"),
+    prevent_initial_call=True
+)
+def load_frame_for_annotation(n_clicks, video_path, frame_num):
+    if not video_path or frame_num is None:
+        raise PreventUpdate
+    cap = cv2.VideoCapture(video_path)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if frame_num < 0:
+        frame_num = 0
+    if frame_num >= total_frames:
+        frame_num = total_frames - 1
+
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+    ret, frame = cap.read()
+    cap.release()
+    if not ret:
+        raise PreventUpdate
+
+    success, buf = cv2.imencode(".png", frame)
+    if not success:
+        raise PreventUpdate
+    b64_image = "data:image/png;base64," + base64_encode_image(buf.tobytes())
+
+    return b64_image, total_frames - 1, frame_num
+
+# 4) Save annotation
+@app.callback(
+    Output("annotation_save_status", "children"),
+    Input("save_annotation_btn", "n_clicks"),
+    State("annotation_canvas", "json_data"),
+    State("annotation_canvas", "image_content"),
+    State("stored-roboflow-api-key", "data"),
+    prevent_initial_call=True
+)
+def save_annotation_btn(n_clicks, canvas_data, b64_image, rf_api_key):
+    if not b64_image:
+        return "No image loaded."
+    header, encoded = b64_image.split(",", 1)
+    decoded = base64.b64decode(encoded)
+    np_img = np.frombuffer(decoded, np.uint8)
+    img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
+
+    shapes = parse_jsonstring(canvas_data, shape_type='rectangle')
+    for shape in shapes:
+        x0, y0 = shape['x0'], shape['y0']
+        x1, y1 = shape['x1'], shape['y1']
+        cv2.rectangle(img, (int(x0), int(y0)), (int(x1), int(y1)), (0,255,0), 2)
+
+    out_name = f"annotated_{uuid.uuid4().hex}.png"
+    cv2.imwrite(out_name, img)
+
+    if rf_api_key:
         try:
-            weights = get_available_weights()
-            return html.Ul([html.Li(weight) for weight in weights])
-        except Exception as e:
-            return f"Error listing weights: {str(e)}"
-
-    # Callback for downloading weights
-    @app.callback(
-        Output("download-status", "children"),
-        Input("download-weights-button", "n_clicks"),
-        State("repo-id", "value"),
-        State("model-name", "value"),
-        State("huggingface-token", "value")
-    )
-    def download_weights(n_clicks, repo_id, model_name, huggingface_token):
-        if not n_clicks:
-            return ""
-        try:
-            success = download_model(repo_id, model_name, huggingface_token)
-            return "Downloaded successfully!" if success else "Download failed."
-        except Exception as e:
-            return f"Error downloading weights: {str(e)}"
-
-    @app.callback(
-        Output("tracking-status", "children"),
-        Input("run-tracking-button", "n_clicks"),
-        State("video-path", "value"),
-        State("output-folder", "value"),
-        State("weight-name-tracking", "value")
-    )
-    def run_tracking_callback(n_clicks, video_path, output_folder, weight_name):
-        """
-        Callback to handle tracking functionality when the 'Run Tracking' button is clicked.
-
-        Args:
-            n_clicks (int): Number of times the button is clicked.
-            video_path (str): Path to the input video.
-            output_folder (str): Path to the folder where outputs will be saved.
-            weight_name (str): Name of the model weight to use.
-
-        Returns:
-            str: Status message indicating success or error.
-        """
-        if not n_clicks:
-            return ""
-
-        # Validate inputs
-        if not video_path or not os.path.exists(video_path):
-            return "Error: Invalid or missing video file path."
-        if not output_folder:
-            return "Error: Output folder path is required."
-        if not weight_name:
-            return "Error: Weight name is required."
-
-        try:
-            # Run the tracking process
-            message = main(output_folder, video_path, weight_name)
-            return f"Tracking completed successfully! Results saved to {output_folder}"
-        except FileNotFoundError:
-            return "Error: Specified video file not found."
-        except Exception as e:
-            return f"Error during tracking: {str(e)}"
-
-    @app.callback(
-        Output("upload-status", "children"),
-        Input("upload-video", "contents"),
-        State("upload-video", "filename")
-    )
-    def upload_and_process_video(contents, filename):
-        global frame_paths, current_frame_index
-        if contents:
-            frame_paths = []
-            current_frame_index = 0
-
-            # Decode and save the uploaded video
-            content_type, content_string = contents.split(",")
-            video_data = base64.b64decode(content_string)
-            video_path = os.path.join(UPLOAD_FOLDER, filename)
-
-            with open(video_path, "wb") as f:
-                f.write(video_data)
-
-            # Extract frames
-            video_capture = cv2.VideoCapture(video_path)
-            frame_count = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
-
-            for i in range(frame_count):
-                ret, frame = video_capture.read()
-                if not ret:
-                    break
-                frame_path = os.path.join(FRAME_FOLDER, f"frame_{i}.jpg")
-                cv2.imwrite(frame_path, frame)
-                frame_paths.append(frame_path)
-
-            video_capture.release()
-            return f"Video uploaded successfully! {len(frame_paths)} frames extracted."
-
-        return "No video uploaded."
-
-    @app.callback(
-        [Output("frame-display", "children"),
-         Output("frame-number", "children")],
-        [Input("back-button", "n_clicks"),
-         Input("forward-button", "n_clicks"),
-         Input("frame-input", "value")],
-        prevent_initial_call=True
-    )
-    def navigate_frames(back_clicks, forward_clicks, frame_input):
-        """
-        Navigate through frames using arrow buttons or manual input.
-
-        Args:
-            back_clicks (int): Number of times the back button was clicked.
-            forward_clicks (int): Number of times the forward button was clicked.
-            frame_input (int): The frame number entered manually.
-
-        Returns:
-            tuple: Frame display (image) and frame number text.
-        """
-        global current_frame_index
-        ctx = dash.callback_context
-
-        # Determine which input triggered the callback
-        if not ctx.triggered or not frame_paths:
-            return "No frames available.", ""
-        trigger = ctx.triggered[0]["prop_id"].split(".")[0]
-
-        # Update current_frame_index based on the triggering input
-        if trigger == "back-button":
-            current_frame_index = max(0, current_frame_index - 1)
-        elif trigger == "forward-button":
-            current_frame_index = min(len(frame_paths) - 1, current_frame_index + 1)
-        elif trigger == "frame-input" and frame_input is not None:
-            if 1 <= frame_input <= len(frame_paths):
-                current_frame_index = frame_input - 1
-            else:
-                return "Invalid frame number.", f"Invalid frame number: {frame_input}"
-
-        # Get the current frame path
-        frame_path = frame_paths[current_frame_index]
-        encoded_image = base64.b64encode(open(frame_path, "rb").read()).decode()
-        frame_img = html.Img(src=f"data:image/jpeg;base64,{encoded_image}", style={"width": "80%"})
-        return frame_img, f"Frame {current_frame_index + 1} / {len(frame_paths)}"
-
-    @app.callback(
-        Output("annotation-status", "children"),
-        Input("annotate-button", "n_clicks"),
-        State("annotation-type", "value"),
-        State("model-name", "value"),
-        State("api-key", "value")
-    )
-
-    def annotate_frame_callback(n_clicks, annotation_type, model_name, api_key):
-        global current_frame_index
-
-
-        # Ensure the callback is triggered by a button click
-        if not n_clicks:
-            return ""
-
-        # Validate API key only after the button is clicked
-        if not api_key:
-            return "Error: An API key is required to perform annotation."
-
-        # Validate frame paths
-        if not frame_paths:
-            return "No frames available for annotation."
-
-        # Validate annotation type
-        if not annotation_type or annotation_type not in ["auto", "manual"]:
-            return "Invalid annotation type. Please select 'auto' or 'manual'."
-
-        # Validate model name for auto annotation
-        if annotation_type == "auto" and not model_name:
-            return "Model name is required for auto annotation."
-
-        try:
-            # Get the current frame path
-            frame_path = frame_paths[current_frame_index]
-
-            # Call the annotate_image function
-
-            result = annotate_image(
-                annotation_type=annotation_type,
-                image_path=frame_path,
-                model=model_name,
-                api_key=api_key
+            # Adjust "workspace" & "project_name" to your environment
+            # e.g. workspace="gt-sulchek-lab", project_name="sep13"
+            _info = upload_annotation_to_roboflow(
+                api_key=rf_api_key,
+                workspace="gt-sulchek-lab",
+                project_name="sep13",
+                image_path=out_name
             )
-            return result
-        except FileNotFoundError:
-            return f"Error: Frame file not found at {frame_paths[current_frame_index]}."
-        except ValueError as ve:
-            return f"Input Error: {ve}"
-        except RuntimeError as re:
-            return f"Runtime Error: {re}"
+            return f"Annotation saved: {out_name}, uploaded to Roboflow."
         except Exception as e:
-            return f"Unexpected Error: {e}"
+            return f"Saved: {out_name}, Roboflow upload failed: {str(e)}"
+    else:
+        return f"Annotation saved locally: {out_name}"
 
-
-    @app.callback(
-        Output("training-status", "children"),
-        Input("train-button", "n_clicks"),
-        State("epochs", "value"),
-        State("batch", "value"),
-        State("patience", "value"),
-        State("weight-destination", "value"),
-        State("api-key-train", "value")
+# 5) Train model
+@app.callback(
+    Output("training_status", "children"),
+    Input("train_model_btn", "n_clicks"),
+    State("stored-roboflow-api-key", "data"),
+    State("stored-hf-repo-id", "data"),
+    State("stored-hf-token", "data"),
+    State("stored-selected-weight", "data"),
+    State("stored-training-params", "data"),
+    prevent_initial_call=True
+)
+def on_train_model(n_clicks, rf_key, hf_repo, hf_token, sel_weight, params):
+    if not all([rf_key, hf_repo, hf_token, sel_weight, params]):
+        return "Missing settings or parameters."
+    msg = train_model(
+        api_key=rf_key,
+        hf_repo_id=hf_repo,
+        hf_token=hf_token,
+        selected_weight=sel_weight,
+        epochs=params["epochs"],
+        batch_size=params["batch_size"],
+        patience=params["patience"]
     )
-    def train_callback(n_clicks, epochs, batch, patience, weight_destination, api_key):
-        """
-        Callback to handle the training process when the 'Train Model' button is clicked.
+    return msg
 
-        Args:
-            n_clicks (int): Number of times the button is clicked.
-            epochs (int): Number of epochs to train.
-            batch (int): Batch size.
-            patience (int): Patience for early stopping.
-            weight_destination (str): Destination folder for weights.
-            api_key (str): API key for Roboflow authentication.
+#
+# ====== TRACKING ======
+#
+@app.callback(
+    Output("tracking_status", "children"),
+    Output("tracking_progress_bar", "value"),
+    Input("run_tracking_btn", "n_clicks"),
+    State("tracking_folder_path", "value"),
+    State("tracking_frame_rate", "value"),
+    State("export_file_types", "value"),
+    prevent_initial_call=True
+)
+def run_tracking(n_clicks, folder_path, fps, export_types):
+    if not folder_path or not os.path.isdir(folder_path):
+        return "Invalid folder path.", 0
+    if not fps:
+        return "Frame rate not set.", 0
 
-        Returns:
-            str: Status message indicating success or error.
-        """
-        if not n_clicks:
-            return ""
+    # gather videos
+    all_videos = glob.glob(os.path.join(folder_path, "*.mp4"))
+    all_videos += glob.glob(os.path.join(folder_path, "*.avi"))
+    if not all_videos:
+        return "No videos found in folder.", 0
 
-        # Validate inputs
-        if not epochs or not batch or not patience or not weight_destination or not api_key:
-            return "Error: All fields (epochs, batch, patience, weight destination, and API key) are required."
+    step = max(1, 100 // len(all_videos))
+    progress_val = 0
 
-        try:
-            # Call the train_model function with the API key
-            result = train_model(epochs, batch, patience, weight_destination, api_key=api_key)
-            return result
-        except Exception as e:
-            return f"Error during training: {str(e)}"
-    return app
+    for i, vid in enumerate(all_videos):
+        track_video(
+            video_path=vid,
+            model_path="sep13.pt",  # or your local model path
+            fps=fps,
+            export_csv=("csv" in export_types),
+            export_avi=("avi" in export_types)
+        )
+        progress_val = min(progress_val + step, 100)
 
-def run():
-    app = create_app()
-    app.run_server(debug=True)
+    return f"Tracking complete for {len(all_videos)} video(s).", 100
 
-
+#
+# ---------------------------------------------------------------------
+# 4) RUN SERVER
+# ---------------------------------------------------------------------
+#
 if __name__ == "__main__":
-    run()
+    app.run_server(debug=True)
