@@ -1,6 +1,8 @@
 import os
 import json
 import pathlib
+import sys
+import argparse
 
 
 DEFAULT_SETTINGS_PATH = os.path.join(pathlib.Path(__file__).parents[0], "default_settings.json") # NEVER LET USER MODIFY THIS
@@ -47,6 +49,9 @@ def get_setting(setting_name):
 
     return settings[setting_name]
 
+def soft_get_setting(setting_name):
+    return settings.get(setting_name, None)
+
 def get_settings_path(settings_path_path):
     try:
 
@@ -62,7 +67,11 @@ def get_settings_path(settings_path_path):
         with open(settings_path_path, "r") as f:
             settings_path = f.read()
 
-        assert os.path.exists(settings_path)
+        if not os.path.exists(settings_path):
+            with open(DEFAULT_SETTINGS_PATH, "r") as default:
+                temp_settings = json.load(default)
+                with open(settings_path, "w") as normal:
+                    normal.write(json.dumps(temp_settings, indent=4))
 
         return settings_path
 
@@ -87,6 +96,36 @@ def restore_default_settings():
 
     with open(NORMAL_SETTINGS_PATH, "w") as f:
         f.write(json.dumps(settings, indent=4))
+
+def set_new_settings_file(argv=sys.argv):
+    global settings_path
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('path', type=os.path.abspath, help='Enter the path to the settings file')
+    args = parser.parse_args(argv[1:])
+    path = args.path
+
+    if not os.path.exists(path):
+        raise FileNotFoundError("Settings file not found")
+
+    with open(SETTINGS_PATH_PATH, "w") as file:
+        file.write(path)
+
+    settings_path = get_settings_path(SETTINGS_PATH_PATH)
+
+    read_settings(settings_path)
+
+def print_settings_file_path():
+    global settings_path
+    print(settings_path)
+
+def print_setting(argv=sys.argv):
+    parser = argparse.ArgumentParser()
+    parser.add_argument('setting', type=str, help="Setting to print")
+    args = parser.parse_args(argv[1:])
+    setting = args.setting
+
+    print(get_setting(setting))
 
 
 settings_path = get_settings_path(SETTINGS_PATH_PATH)

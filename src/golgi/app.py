@@ -19,6 +19,8 @@ from dash.exceptions import PreventUpdate
 from dash_canvas import DashCanvas
 from dash_canvas.utils import parse_jsonstring
 
+from golgi import settings
+
 
 #
 # ---------------------------------------------------------------------
@@ -33,25 +35,47 @@ def background_subtraction(video_path, output_path=None):
     if output_path is None:
         output_path = os.path.splitext(video_path)[0] + "_bg_sub.avi"
 
-    cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise FileNotFoundError(f"Cannot open video: {video_path}")
 
-    fgbg = cv2.createBackgroundSubtractorMOG2(history=500, detectShadows=False)
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    out = cv2.VideoWriter(output_path, fourcc, fps, (w, h), False)  # grayscale
-
-    while True:
+    frames = []
+    while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
-        fgmask = fgbg.apply(frame)
-        out.write(fgmask)
+        frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
     cap.release()
+
+    if not frames:
+        raise ValueError("No frames extracted from the video.")
+
+    frames = np.array(frames)
+
+    # Perform Z-projection (median) for background
+    background_median = np.median(frames, axis=0).astype(np.uint8)
+
+    # Calculate global min and max for normalization
+    global_min, global_max = np.inf, -np.inf
+    for frame in frames:
+        subtracted = frame.astype(np.float32) - background_median.astype(np.float32)
+        global_min = min(global_min, np.min(subtracted))
+        global_max = max(global_max, np.max(subtracted))
+
+    # Initialize video writer
+    height, width = frames[0].shape
+    out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'XVID'), 1, (width, height), isColor=False)
+
+    # Process frames
+    scaling_factor = 0.5  # Adjust brightness (0 < scaling_factor ≤ 1 for reducing brightness)
+    for frame in frames:
+        subtracted = frame.astype(np.float32) - background_median.astype(np.float32)
+        normalized = ((subtracted - global_min) / (global_max - global_min) * 255) * scaling_factor
+        normalized = np.clip(normalized, 0, 255).astype(np.uint8)
+        out.write(normalized)
+
     out.release()
+
+
     return output_path
 
 def load_hf_model(repo_id, filename, token):
@@ -240,15 +264,18 @@ app.layout = dbc.Container([
 
             html.H6("Roboflow Credentials"),
             dbc.InputGroup([
-                dbc.Input(id="roboflow_api_key", type="text", placeholder="Roboflow API Key"),
+                dbc.Input(id="roboflow_api_key", type="text", placeholder="Roboflow API Key",
+                          value=settings.soft_get_setting("roboflow_api_key")),
                 dbc.Button("Load", id="load_roboflow_key", color="primary")
             ], className="mb-2"),
             html.Div(id="roboflow_status", className="text-secondary mb-3"),
 
             html.H6("Hugging Face Credentials"),
             dbc.InputGroup([
-                dbc.Input(id="hf_repo_id", type="text", placeholder="Repo ID"),
-                dbc.Input(id="hf_token", type="text", placeholder="HF Token"),
+                dbc.Input(id="hf_repo_id", type="text", placeholder="Repo ID",
+                          value=settings.soft_get_setting("huggingface_repo_id")),
+                dbc.Input(id="hf_token", type="text", placeholder="HF Token",
+                          value=settings.soft_get_setting("huggingface_token")),
                 dbc.Button("Load HF", id="load_hf_token", color="primary")
             ], className="mb-2"),
             html.Div(id="huggingface_status", className="text-secondary mb-3"),
@@ -264,9 +291,12 @@ app.layout = dbc.Container([
 
             html.H6("Training Params"),
             dbc.InputGroup([
-                dbc.Input(id="training_epochs", type="number", placeholder="epochs"),
-                dbc.Input(id="training_batch", type="number", placeholder="batch size"),
-                dbc.Input(id="training_patience", type="number", placeholder="patience"),
+                dbc.Input(id="training_epochs", type="number", placeholder="epochs",
+                          value=settings.soft_get_setting("training_epochs")),
+                dbc.Input(id="training_batch", type="number", placeholder="batch size",
+                          value=settings.soft_get_setting("training_batch_size")),
+                dbc.Input(id="training_patience", type="number", placeholder="patience",
+                          value=settings.soft_get_setting("training_patience")),
                 dbc.Button("Set Params", id="load_training_params", color="primary")
             ], className="mb-2"),
             html.Div(id="training_params_status", className="text-secondary mb-3"),
@@ -338,12 +368,14 @@ app.layout = dbc.Container([
             html.H3("Tracking", className="text-primary mt-3"),
 
             dbc.InputGroup([
-                dbc.Input(id="tracking_folder_path", placeholder="Folder containing videos"),
+                dbc.Input(id="tracking_folder_path", placeholder="Folder containing videos",
+                          value=settings.soft_get_setting("video_folder")),
                 dbc.Button("Set Folder", id="set_folder_btn", color="primary")
             ], className="mb-2"),
 
             dbc.InputGroup([
-                dbc.Input(id="tracking_frame_rate", type="number", placeholder="Frame Rate"),
+                dbc.Input(id="tracking_frame_rate", type="number", placeholder="Frame Rate",
+                          value=settings.soft_get_setting("framerate")),
                 dbc.Button("Set Rate", id="set_frame_rate_btn", color="primary")
             ], className="mb-2"),
 
@@ -637,5 +669,9 @@ def run_tracking(n_clicks, folder_path, fps, export_types):
 # 4) RUN SERVER
 # ---------------------------------------------------------------------
 #
-if __name__ == "__main__":
+
+def main():
     app.run_server(debug=True)
+
+if __name__ == "__main__":
+    main()

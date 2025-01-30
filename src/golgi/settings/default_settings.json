@@ -15,5 +15,11 @@
     "um_per_pixel" : null,
     "window_width" : null,
     "scatter" : null,
-    "verbose" : null
+    "verbose" : null,
+
+    "video_folder" : null,
+
+    "training_epochs" : null,
+    "training_batch_size" : null,
+    "training_patience" : null
 }
