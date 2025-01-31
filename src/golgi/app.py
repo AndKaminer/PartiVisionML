@@ -232,9 +232,14 @@ def run_tracking_on_folder(folder_path, output_types, frame_rate_override=None):
     For each .avi/.mp4 in folder, run background subtraction + tracking
     and optionally output CSV, AVI videos.
     """
+
     processed_files = []
     if not os.path.isdir(folder_path):
         return processed_files
+
+    output_folder = os.path.join(folder_path, "output")
+    if not os.path.exist(output_folder):
+        os.mkdirs(output_folder)
 
     for file_name in os.listdir(folder_path):
         ext = file_name.lower()
@@ -260,7 +265,7 @@ def run_tracking_on_folder(folder_path, output_types, frame_rate_override=None):
         )
 
         if "CSV" in output_types:
-            csv_path = os.path.join(folder_path, f"{base}_tracking.csv")
+            csv_path = os.path.join(output_folder, f"{base}_tracking.csv")
             with open(csv_path, 'w') as f:
                 f.write("time,area,perimeter,height,velocity,acceleration,circularity,y_position\n")
                 for row in results:
@@ -447,11 +452,13 @@ app.layout = dbc.Container([
             dbc.Row([
                 dbc.Col([
                     html.Label("Folder Path for Videos", className="fw-bold"),
-                    dcc.Input(id="tracking-folder-path", type="text", placeholder=r"C:\my_videos", className="form-control")
+                    dcc.Input(id="tracking-folder-path", type="text", placeholder=r"C:\my_videos", className="form-control",
+                              value=settings.soft_get_setting("video_folder"))
                 ], width=6),
                 dbc.Col([
                     html.Label("Frame Rate Override (optional)", className="fw-bold"),
-                    dcc.Input(id="tracking-frame-rate", type="number", placeholder="25", className="form-control")
+                    dcc.Input(id="tracking-frame-rate", type="number", placeholder="25", className="form-control",
+                              value=settings.soft_get_setting("framerate") )
                 ], width=3),
             ], className="mb-3"),
 
