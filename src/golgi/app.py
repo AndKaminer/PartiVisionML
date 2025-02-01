@@ -13,14 +13,18 @@ import dash_bootstrap_components as dbc
 from dash_canvas import DashCanvas
 from dash.exceptions import PreventUpdate
 from huggingface_hub import hf_hub_download
+from ultralytics import YOLO
 
 from golgi import settings
+from golgi.inference import InferencePipeline
 
 #############################################
 # 1) Check / Download Model from Hugging Face
 #############################################
 
-LOCAL_MODEL_PATH = os.path.join("models", settings.soft_get_setting("model_name"))
+MODELS_FOLDER = os.path.join(os.getcwd(), "models")
+LOCAL_MODEL_PATH = os.path.join(MODELS_FOLDER, settings.soft_get_setting("model_name"))
+INFERENCE_PIPELINE = None
 
 def ensure_model_exists():
     """
@@ -31,14 +35,14 @@ def ensure_model_exists():
         return LOCAL_MODEL_PATH
     else:
         print(f"Local model not found at {LOCAL_MODEL_PATH}. Downloading from HuggingFace...")
-        os.makedirs("models", exist_ok=True)
+        os.makedirs(MODELS_FOLDER, exist_ok=True)
         downloaded_file = hf_hub_download(
             repo_id=settings.soft_get_setting("huggingface_repo_id"),
             filename=settings.soft_get_setting("model_name"),
-            token=settings.soft_get_setting("huggingface_token")
+            token=settings.soft_get_setting("huggingface_token"),
+            local_dir=MODELS_FOLDER
         )
         # Move downloaded file to "models/sep13.pt"
-        os.rename(downloaded_file, LOCAL_MODEL_PATH)
         print(f"Model downloaded and stored at {LOCAL_MODEL_PATH}.")
         return LOCAL_MODEL_PATH
 
@@ -227,7 +231,25 @@ def background_subtraction_with_6plots(
     return results
 
 
-def run_tracking_on_folder(folder_path, output_types, frame_rate_override=None):
+def track_video(video_path, model, framerate, window_width, scaling_factor, um_per_pixel, output_folder, avi, csv):
+    global INFERENCE_PIPELINE
+
+    ip = InferencePipeline(
+            model=model,
+            framerate=framerate,
+            window_width=window_width,
+            scaling_factor=scaling_factor,
+            um_per_pixel=um_per_pixel,
+            output_folder=output_folder)
+        
+    INFERENCE_PIPELINE = ip
+
+    ip.process_video(video_path, avi=avi, csv=csv)
+
+    INFERENCE_PIPELINE = None
+
+
+def run_tracking_on_folder(folder_path, output_types, frame_rate):
     """
     For each .avi/.mp4 in folder, run background subtraction + tracking
     and optionally output CSV, AVI videos.
@@ -238,41 +260,30 @@ def run_tracking_on_folder(folder_path, output_types, frame_rate_override=None):
         return processed_files
 
     output_folder = os.path.join(folder_path, "output")
-    if not os.path.exist(output_folder):
-        os.mkdirs(output_folder)
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
+    model = YOLO(MODEL_PATH)
+
+    avi = "AVI"in output_types
+    csv = "CSV" in output_types
 
     for file_name in os.listdir(folder_path):
         ext = file_name.lower()
         if not(ext.endswith('.avi') or ext.endswith('.mp4')):
             continue
         input_path = os.path.join(folder_path, file_name)
-        base = os.path.splitext(file_name)[0]
 
-        out_bg_vid = None
-        out_plt_vid = None
-        if "AVI" in output_types:
-            out_bg_vid = os.path.join(folder_path, f"{base}_bg_sub.avi")
-            out_plt_vid = os.path.join(folder_path, f"{base}_6plots.avi")
-
-        results = background_subtraction_with_6plots(
-            input_video=input_path,
-            output_video=out_bg_vid,
-            plot_output_video=out_plt_vid,
-            model_path=MODEL_PATH,
-            scaling_factor_brightness=1.0,
-            denoise=True,
-            frame_rate_override=frame_rate_override
-        )
-
-        if "CSV" in output_types:
-            csv_path = os.path.join(output_folder, f"{base}_tracking.csv")
-            with open(csv_path, 'w') as f:
-                f.write("time,area,perimeter,height,velocity,acceleration,circularity,y_position\n")
-                for row in results:
-                    f.write("{},{},{},{},{},{},{},{}\n".format(
-                        row['time'], row['area'], row['perimeter'], row['height'],
-                        row['velocity'], row['acceleration'], row['circularity'], row['y_position']
-                    ))
+        track_video(input_path,
+                    model,
+                    frame_rate,
+                    settings.soft_get_setting("window_width"),
+                    settings.soft_get_setting("scaling_factor"),
+                    settings.soft_get_setting("um_per_pixel"),
+                    output_folder,
+                    avi,
+                    csv)
+        
         processed_files.append(file_name)
     return processed_files
 
@@ -335,7 +346,7 @@ def upload_annotation_to_roboflow(image_bgr, shapes, frame_index):
 #############################################
 # 4) Dash App
 #############################################
-app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], update_title=None)
 
 app.title = "Cell Tracking Dashboard"
 
@@ -480,7 +491,8 @@ app.layout = dbc.Container([
                     html.Button("Run Tracking", id="btn-run-tracking", n_clicks=0, className="btn btn-danger")
                 ], width=2),
                 dbc.Col([
-                    dbc.Progress(id="tracking-progress", value=0, striped=True, animated=True, style={"height":"30px"})
+                    dbc.Progress(id="tracking-progress", value=0, striped=True, animated=True, style={"height":"30px"}),
+                    dcc.Interval(id="progress-interval", n_intervals=0, interval=500)
                 ], width=7),
             ]),
 
@@ -650,8 +662,8 @@ def save_annotation(n_clicks, frame_idx, frames, annotation_str):
 
 # -- RUN TRACKING ON A FOLDER --
 @app.callback(
-    Output("tracking-progress", "value"),
-    Output("tracking-progress", "label"),
+    Output("tracking-progress", "value", allow_duplicate=True),
+    Output("tracking-progress", "label", allow_duplicate=True),
     Output("tracking-status", "children"),
     Input("btn-run-tracking", "n_clicks"),
     State("tracking-folder-path", "value"),
@@ -668,6 +680,24 @@ def run_tracking(n_clicks, folder_path, export_values, frame_rate):
         return (0, "0%", "No videos processed. Check folder path or no .avi/.mp4 found.")
 
     return (100, "100%", f"Processing complete: {processed}")
+
+
+# -- UPDATE PROGRESS BAR --
+@app.callback(
+    Output("tracking-progress", "value"),
+    Output("tracking-progress", "label"),
+    Input("progress-interval", "n_intervals"),
+    Input("tracking-progress", "value"),
+    Input("tracking-progress", "label"))
+def update_progress(n, value, label):
+    if INFERENCE_PIPELINE == None:
+        return value, label
+
+    progress = int(INFERENCE_PIPELINE.progress * 100)
+
+    return progress, f"{progress}%" if progress >= 5 else ""
+
+
 
 def main():
     app.run_server(debug=True)
