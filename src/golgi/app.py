@@ -14,6 +14,8 @@ from dash_canvas import DashCanvas
 from dash.exceptions import PreventUpdate
 from huggingface_hub import hf_hub_download
 from ultralytics import YOLO
+import roboflow
+import cv2
 
 from golgi import settings
 from golgi.inference import InferencePipeline
@@ -306,8 +308,9 @@ def upload_annotation_to_roboflow(image_bgr, shapes, frame_index):
 
     # Convert dash-canvas rectangles to Roboflow annotation format
     ann_list = []
+    contours = []
     for s in shapes:
-        if s.get("shape") == "rect":
+        if s.get("type") == "rect":
             left = s["x"]
             top = s["y"]
             width = s["width"]
@@ -322,6 +325,13 @@ def upload_annotation_to_roboflow(image_bgr, shapes, frame_index):
                 "class": "cell"
             }
             ann_list.append(ann)
+        elif s.get("type") == "path":
+            contours.append(dash_canvas_to_opencv(s))
+
+    cv2.drawContours(image_bgr, contours, -1, (0,255,0), 2)
+    cv2.imshow("Image", image_bgr)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
     json_annotation = {
         "name": f"frame_{frame_index}.jpg",
@@ -341,6 +351,28 @@ def upload_annotation_to_roboflow(image_bgr, shapes, frame_index):
         print(f"[Roboflow] Frame {frame_index} uploaded successfully.")
     else:
         print(f"[Roboflow] Frame {frame_index} upload failed: {resp.status_code}, {resp.text}")
+
+
+def dash_canvas_to_opencv(path_object):
+    path = path_object.get("path", [])
+    points = []
+    offset = path_object.get("pathOffset", {"x": 0, "y": 0})
+    xoffset = offset["x"]
+    yoffset = offset["y"]
+
+    for curve in path:
+        if curve[0] == "M" or curve[0] == "L":
+            points.append([(xoffset + curve[1]) * 400 / 704, yoffset + curve[2]])
+        elif curve[0] == "Q":
+            points.append([(xoffset + curve[1]) * 400 / 704, yoffset + curve[2]])
+            points.append([(xoffset + curve[3]) * 400 / 704, yoffset + curve[4]])
+        else:
+            return []
+
+    ctr = np.array(points).reshape((-1, 1, 2)).astype(np.int32)
+
+    return ctr
+
 
 
 #############################################
@@ -447,7 +479,7 @@ app.layout = dbc.Container([
                     height=400,
                     lineWidth=2,
                     goButtonTitle='Done',
-                    tool='rectangle'
+                    tool='pencil'
                 ),
             ], className="border border-secondary mb-2", style={"display":"inline-block"}),
 
@@ -647,7 +679,7 @@ def save_annotation(n_clicks, frame_idx, frames, annotation_str):
     frame_b64 = frames[frame_idx]
     dec = base64.b64decode(frame_b64)
     arr = np.frombuffer(dec, np.uint8)
-    frame_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    frame_bgr = cv2.imdecode(arr, 0)
 
     # annotation_str is a JSON string
     try:
@@ -656,6 +688,7 @@ def save_annotation(n_clicks, frame_idx, frames, annotation_str):
         ann_data = {"objects":[]}
 
     shapes = ann_data.get("objects", [])
+    print(shapes)
     upload_annotation_to_roboflow(frame_bgr, shapes, frame_idx)
     return f"Annotation for frame {frame_idx} uploaded to Roboflow successfully."
 
