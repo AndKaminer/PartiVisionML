@@ -354,6 +354,9 @@ def upload_annotation_to_roboflow(image_bgr, shapes, frame_index):
 
 
 def dash_canvas_to_opencv(path_object):
+    # WHAT THE HELL IS THIS SCALING. IT'S TOTALLY NONSENSICAL. IVE TRIED EVERY COMBO I CAN THINK OF.
+    # Somehow, the canvas size is mixing with the size of the actual image to create some really weird scaling 
+    # on the path. When I convert things to opencv, the path is offset from where it should be
     path = path_object.get("path", [])
     points = []
     offset = path_object.get("pathOffset", {"x": 0, "y": 0})
