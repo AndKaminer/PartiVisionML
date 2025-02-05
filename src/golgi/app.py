@@ -7,6 +7,8 @@ import matplotlib
 matplotlib.use('Agg')  # For headless/server environments
 import matplotlib.pyplot as plt
 import requests
+import tempfile
+import time
 
 from dash import Dash, dcc, html, Input, Output, State
 import dash_bootstrap_components as dbc
@@ -19,6 +21,7 @@ import cv2
 
 from golgi import settings
 from golgi.inference import InferencePipeline
+from golgi.annotation import AnnotatedImage
 
 #############################################
 # 1) Check / Download Model from Hugging Face
@@ -27,6 +30,8 @@ from golgi.inference import InferencePipeline
 MODELS_FOLDER = os.path.join(os.getcwd(), "models")
 LOCAL_MODEL_PATH = os.path.join(MODELS_FOLDER, settings.soft_get_setting("model_name"))
 INFERENCE_PIPELINE = None
+CANVAS_WIDTH = 400
+CANVAS_HEIGHT = 400
 
 def ensure_model_exists():
     """
@@ -39,9 +44,9 @@ def ensure_model_exists():
         print(f"Local model not found at {LOCAL_MODEL_PATH}. Downloading from HuggingFace...")
         os.makedirs(MODELS_FOLDER, exist_ok=True)
         downloaded_file = hf_hub_download(
-            repo_id=settings.soft_get_setting("huggingface_repo_id"),
+repo_id=settings.soft_get_setting("huggingface_repo_id"),
             filename=settings.soft_get_setting("model_name"),
-            token=settings.soft_get_setting("huggingface_token"),
+token=settings.soft_get_setting("huggingface_token"),
             local_dir=MODELS_FOLDER
         )
         # Move downloaded file to "models/sep13.pt"
@@ -293,88 +298,137 @@ def run_tracking_on_folder(folder_path, output_types, frame_rate):
 #############################################
 # 3) Roboflow Annotation Upload
 #############################################
-ROBOFLOW_API_KEY = settings.soft_get_setting("roboflow_api_key")
-def upload_annotation_to_roboflow(image_bgr, shapes, frame_index):
+def upload_annotation_to_roboflow(api_key, workspace, project, image_bgr, shapes, frame_index):
     """
     Upload bounding boxes for the frame (converted to .jpg in memory) to 
     the Roboflow dataset "sep13" with your API key.
     """
-    dataset_name = "sep13"  # Change if your dataset name is different
-    url = f"https://api.roboflow.com/dataset/{dataset_name}/upload"
 
-    # Convert image to .jpg
-    _, buffer = cv2.imencode('.jpg', image_bgr)
-    file_bytes = buffer.tobytes()
-
-    # Convert dash-canvas rectangles to Roboflow annotation format
-    ann_list = []
     contours = []
     for s in shapes:
-        if s.get("type") == "rect":
-            left = s["x"]
-            top = s["y"]
-            width = s["width"]
-            height = s["height"]
-            cx = left + width/2.0
-            cy = top + height/2.0
-            ann = {
-                "x": cx,
-                "y": cy,
-                "width": width,
-                "height": height,
-                "class": "cell"
-            }
-            ann_list.append(ann)
-        elif s.get("type") == "path":
+        if s.get("type") == "path":
             contours.append(dash_canvas_to_opencv(s))
+        
+    mask = np.zeros(image_bgr.shape, np.uint8)
+    cv2.drawContours(mask, contours, -1, (255), -1)
+    
+    rf = roboflow.Roboflow(api_key=api_key)
+    project = rf.workspace(workspace).project(project)
 
-    cv2.drawContours(image_bgr, contours, -1, (0,255,0), 2)
-    cv2.imshow("Image", image_bgr)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    image_path, annotation_path, temp_dir = temp_construct_roboflow_annotation(image_bgr, mask)
 
-    json_annotation = {
-        "name": f"frame_{frame_index}.jpg",
-        "annotations": ann_list
+    print(project.single_upload(image_path=image_path,
+                                annotation_path=annotation_path,
+                                batch_name="batch"))
+
+
+def temp_construct_roboflow_annotation(image, mask):
+    temp_dir = tempfile.TemporaryDirectory()
+    img_path = os.path.join(temp_dir.name, "defaultfilename.png")
+    cv2.imwrite(img_path, image)
+    annotation_path = img_path + "-annotation.coco.json"
+
+    current_time = time.localtime()
+
+    resize_constant = 3
+    
+    # info
+    year = current_time.tm_year
+    version = "1.0"
+    description = "not found"
+    contributor = "not found"
+    url = "not found"
+    date_created = f"{current_time.tm_mday}-{current_time.tm_mon}-{current_time.tm_year}"
+
+    info = {
+        "year": year,
+        "version": version,
+        "description": description,
+        "contributor": contributor,
+        "url": url,
+        "date_created": date_created
     }
-    params = {
-        "api_key": ROBOFLOW_API_KEY,
-        "name": f"frame_{frame_index}.jpg",
-        "split": "train"
-    }
-    files = {
-        "file": (f"frame_{frame_index}.jpg", file_bytes, "image/jpeg"),
-        "annotations": (None, json.dumps(json_annotation), "application/json")
-    }
-    resp = requests.post(url, params=params, files=files)
-    if resp.status_code == 200:
-        print(f"[Roboflow] Frame {frame_index} uploaded successfully.")
-    else:
-        print(f"[Roboflow] Frame {frame_index} upload failed: {resp.status_code}, {resp.text}")
+
+    licenses = [{
+            "id": 1,
+            "url": "not found",
+            "name": "not found"
+            }]
+
+    categories = [{
+        "id": 0,
+        "name": "Cell",
+        "supercategory": "none"
+        }]
+
+    images = [{
+        "id": 0,
+        "license": 1,
+        "file_name": img_path,
+        "height": image.shape[0],
+        "width": image.shape[1],
+        "date_captured": date_created
+        }]
+
+    annotations = []
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    for id, ctr in enumerate(contours):
+        annotation = {}
+        contour = ctr.flatten().tolist()
+        contour_pairs = [(contour[i], contour[i+1]) for i in range(0, len(contour), 2)]
+        segmentation = [int(coord) for pair in contour_pairs for coord in pair]
+
+        area = cv2.contourArea(ctr)
+        bbox = [ int(x) for x in cv2.boundingRect(ctr) ]
+
+        annotation["segmentation"] = segmentation
+        annotation["area"] = area
+        annotation["bbox"] = bbox
+        annotation["image_id"] = 0
+        annotation["category_id"] = 0
+        annotation["id"] = id
+        annotation["iscrowd"] = 0
+
+        annotations.append(annotation)
+
+    coco_json = {
+            "info" : info,
+            "licenses" : licenses,
+            "categories" : categories,
+            "images" : images,
+            "annotations" : annotations
+            }
+
+    print(coco_json)
+
+    with open(annotation_path, "w") as f:
+        f.write(json.dumps(coco_json))
+
+    return img_path, annotation_path, temp_dir
+    
 
 
 def dash_canvas_to_opencv(path_object):
-    # WHAT THE HELL IS THIS SCALING. IT'S TOTALLY NONSENSICAL. IVE TRIED EVERY COMBO I CAN THINK OF.
-    # Somehow, the canvas size is mixing with the size of the actual image to create some really weird scaling 
-    # on the path. When I convert things to opencv, the path is offset from where it should be
+    # WHAT DIDNT WORK LIST:
+    #    Only scale the offset
     path = path_object.get("path", [])
     points = []
-    offset = path_object.get("pathOffset", {"x": 0, "y": 0})
-    xoffset = offset["x"]
-    yoffset = offset["y"]
 
     for curve in path:
         if curve[0] == "M" or curve[0] == "L":
-            points.append([(xoffset + curve[1]) * 400 / 704, yoffset + curve[2]])
+            points.append([curve[1], curve[2]])
         elif curve[0] == "Q":
-            points.append([(xoffset + curve[1]) * 400 / 704, yoffset + curve[2]])
-            points.append([(xoffset + curve[3]) * 400 / 704, yoffset + curve[4]])
+            points.append([curve[1], curve[2]])
+            points.append([curve[3], curve[4]])
         else:
             return []
 
     ctr = np.array(points).reshape((-1, 1, 2)).astype(np.int32)
 
     return ctr
+
 
 
 
@@ -478,8 +532,8 @@ app.layout = dbc.Container([
             html.Div([
                 DashCanvas(
                     id='canvas-annotation',
-                    width=400,
-                    height=400,
+                    width=CANVAS_WIDTH,
+                    height=CANVAS_HEIGHT,
                     lineWidth=2,
                     goButtonTitle='Done',
                     tool='pencil'
@@ -548,6 +602,8 @@ app.layout = dbc.Container([
 @app.callback(
     Output("training-frames", "data"),
     Output("train-video-status", "children"),
+    Output("canvas-annotation", "width"),
+    Output("canvas-annotation", "height"),
     Input("upload-training-video", "contents"),
     prevent_initial_call=True
 )
@@ -563,19 +619,22 @@ def on_training_video_upload(contents):
     cap = cv2.VideoCapture(temp_filename)
     frames_data = []
     success = True
+    width = height = 0
     while success:
         success, frame = cap.read()
         if not success:
             break
+        height, width = frame.shape[0], frame.shape[1]
         # Convert to jpg base64
         _, buffer = cv2.imencode('.jpg', frame)
+        
         b64_frame = base64.b64encode(buffer).decode('utf-8')
         frames_data.append(b64_frame)
 
     cap.release()
     os.remove(temp_filename)
     status = f"Uploaded video with {len(frames_data)} frames."
-    return frames_data, status
+    return frames_data, status, width, height
 
 
 # -- AUTO-DETECT PARTICLES (naive) --
@@ -670,13 +729,16 @@ def goto_frame(n_clicks, frame_idx, frames):
 # -- SAVE ANNOTATION to Roboflow --
 @app.callback(
     Output("save-annotation-status", "children"),
+    Input("roboflow-api-key", "value"),
+    Input("roboflow-workspace", "value"),
+    Input("roboflow-project-id", "value"),
     Input("btn-save-annotation", "n_clicks"),
     State("frame-index-input", "value"),
     State("training-frames", "data"),
     State("canvas-annotation", "json_data"),
     prevent_initial_call=True
 )
-def save_annotation(n_clicks, frame_idx, frames, annotation_str):
+def save_annotation(api_key, workspace, project, n_clicks, frame_idx, frames, annotation_str):
     if not frames or frame_idx<0 or frame_idx>=len(frames):
         raise PreventUpdate
     frame_b64 = frames[frame_idx]
@@ -691,8 +753,7 @@ def save_annotation(n_clicks, frame_idx, frames, annotation_str):
         ann_data = {"objects":[]}
 
     shapes = ann_data.get("objects", [])
-    print(shapes)
-    upload_annotation_to_roboflow(frame_bgr, shapes, frame_idx)
+    upload_annotation_to_roboflow(api_key, workspace, project, frame_bgr, shapes, frame_idx)
     return f"Annotation for frame {frame_idx} uploaded to Roboflow successfully."
 
 

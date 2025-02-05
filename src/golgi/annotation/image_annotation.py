@@ -16,7 +16,7 @@ class AnnotatedImage:
         self.mask = mask
         self.tempdir = tempfile.TemporaryDirectory()
         self.filename = os.path.join(self.tempdir.name, filename)
-        self.json_filename = self.filename + "-annotation.json"
+        self.json_filename = self.filename + "-annotation.coco.json"
 
         self.annotation_json = Configs.get_default_json()
         self.annotation_json["images"] = [self._get_image(img)]
@@ -43,9 +43,10 @@ class AnnotatedImage:
         area = cv2.contourArea(contours[0]) if contours else 0
         bbox = [int(x) for x in cv2.boundingRect(contours[0])] if contours else None
 
-        annotation["segmentation"] = segmentation
+        annotation["segmentation"] = segmentation[0]
         annotation["area"] = area
         annotation["bbox"] = bbox
+        annotation["image_id"] = 0
 
         return annotation
 
@@ -56,6 +57,7 @@ class AnnotatedImage:
         image["width"] = shape[0]
         image["height"] = shape[1]
         image["file_name"] = self.filename
+        image["id"] = 0
 
         return image
 
@@ -65,7 +67,7 @@ class AnnotatedImage:
         rf = roboflow.Roboflow(api_key=api_key)
         project = rf.workspace(workspace).project(project)
 
-        project.upload(image_path=self.filename,
+        return project.single_upload(image_path=self.filename,
                        annotation_path=self.json_filename,
                        batch_name=Configs.default_roboflow_batch)
 

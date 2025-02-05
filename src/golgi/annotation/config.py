@@ -27,7 +27,7 @@ class Configs:
     }
 
     # license
-    id = "not found"
+    id = 0
     name = "not found"
 
     default_license = {
@@ -38,7 +38,7 @@ class Configs:
 
     # annotation
     image_id = id
-    category_id = "not found"
+    category_id = 0
     segmentation = None
     area = None
     bbox = None
@@ -66,11 +66,18 @@ class Configs:
         "file_name": file_name
     }
 
+    default_category = {
+            "id" : 0,
+            "name" : "Cell",
+            "supercategory" : "none"
+        }
+
     default_json = {
         "info": default_info,
         "images": [default_image],
         "annotations": [default_annotation],
-        "licenses": [default_license]
+        "licenses": [default_license],
+        "categories": [default_category]
     }
 
     def get_default_annotation():
