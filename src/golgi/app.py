@@ -307,7 +307,6 @@ def upload_annotation_to_roboflow(api_key, workspace, project, image_bgr, shapes
     contours = []
     scale = 1
     for s in shapes:
-        print(s)
         if s.get("type") == "path":
             contours.append(dash_canvas_to_opencv(s, scale))
         elif s.get("type") == "image": # image always comes first
