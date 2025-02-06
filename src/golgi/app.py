@@ -298,34 +298,52 @@ def run_tracking_on_folder(folder_path, output_types, frame_rate):
 #############################################
 # 3) Roboflow Annotation Upload
 #############################################
-def upload_annotation_to_roboflow(api_key, workspace, project, image_bgr, shapes, frame_index):
+def upload_annotation_to_roboflow(api_key, workspace, project, image_bgr, shapes, frame_index, window_width=150):
     """
     Upload bounding boxes for the frame (converted to .jpg in memory) to 
     the Roboflow dataset "sep13" with your API key.
     """
 
     contours = []
+    scale = 1
     for s in shapes:
+        print(s)
         if s.get("type") == "path":
-            contours.append(dash_canvas_to_opencv(s))
-        
+            contours.append(dash_canvas_to_opencv(s, scale))
+        elif s.get("type") == "image": # image always comes first
+            scale = s["scaleX"]
+
     mask = np.zeros(image_bgr.shape, np.uint8)
     cv2.drawContours(mask, contours, -1, (255), -1)
-    
+
+    left_bound = float("inf")
+    right_bound = float("-inf")
+
+    for ctr in contours:
+        x, _, w, _ = cv2.boundingRect(ctr)
+        left_bound = min(left_bound, x)
+        right_bound = max(right_bound, x + w)
+
+    left_bound = max(0, left_bound - window_width // 2)
+    right_bound = min(image_bgr.shape[1], right_bound + window_width // 2)
+
+    image_bgr = image_bgr[:, left_bound:right_bound + 1]
+    mask = mask[:, left_bound:right_bound + 1]
+
+
     rf = roboflow.Roboflow(api_key=api_key)
     project = rf.workspace(workspace).project(project)
 
     image_path, annotation_path, temp_dir = temp_construct_roboflow_annotation(image_bgr, mask)
 
-    print(project.single_upload(image_path=image_path,
+    project.single_upload(image_path=image_path,
                                 annotation_path=annotation_path,
-                                batch_name="batch"))
+                                batch_name="batch")
 
 
 def temp_construct_roboflow_annotation(image, mask):
     temp_dir = tempfile.TemporaryDirectory()
     img_path = os.path.join(temp_dir.name, "defaultfilename.png")
-    cv2.imwrite(img_path, image)
     annotation_path = img_path + "-annotation.coco.json"
 
     current_time = time.localtime()
@@ -373,6 +391,8 @@ def temp_construct_roboflow_annotation(image, mask):
     annotations = []
 
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    left_bound = float("inf")
+    right_bound = float("-inf")
 
     for id, ctr in enumerate(contours):
         annotation = {}
@@ -382,6 +402,8 @@ def temp_construct_roboflow_annotation(image, mask):
 
         area = cv2.contourArea(ctr)
         bbox = [ int(x) for x in cv2.boundingRect(ctr) ]
+        left_bound = min(left_bound, bbox[0])
+        right_bound = max(right_bound, bbox[0] + bbox[2])
 
         annotation["segmentation"] = segmentation
         annotation["area"] = area
@@ -393,6 +415,7 @@ def temp_construct_roboflow_annotation(image, mask):
 
         annotations.append(annotation)
 
+
     coco_json = {
             "info" : info,
             "licenses" : licenses,
@@ -401,7 +424,7 @@ def temp_construct_roboflow_annotation(image, mask):
             "annotations" : annotations
             }
 
-    print(coco_json)
+    cv2.imwrite(img_path, image)
 
     with open(annotation_path, "w") as f:
         f.write(json.dumps(coco_json))
@@ -410,18 +433,16 @@ def temp_construct_roboflow_annotation(image, mask):
     
 
 
-def dash_canvas_to_opencv(path_object):
-    # WHAT DIDNT WORK LIST:
-    #    Only scale the offset
+def dash_canvas_to_opencv(path_object, scale):
     path = path_object.get("path", [])
     points = []
 
     for curve in path:
         if curve[0] == "M" or curve[0] == "L":
-            points.append([curve[1], curve[2]])
+            points.append([curve[1] / scale, curve[2] / scale])
         elif curve[0] == "Q":
-            points.append([curve[1], curve[2]])
-            points.append([curve[3], curve[4]])
+            points.append([curve[1] / scale, curve[2] / scale])
+            points.append([curve[3] / scale, curve[4] / scale])
         else:
             return []
 
@@ -753,7 +774,7 @@ def save_annotation(n_clicks, api_key, workspace, project, frame_idx, frames, an
         ann_data = {"objects":[]}
 
     shapes = ann_data.get("objects", [])
-    upload_annotation_to_roboflow(api_key, workspace, project, frame_bgr, shapes, frame_idx)
+    upload_annotation_to_roboflow(api_key, workspace, project, frame_bgr, shapes, frame_idx, settings.soft_get_setting("window_width"))
     return f"Annotation for frame {frame_idx} uploaded to Roboflow successfully."
 
 
