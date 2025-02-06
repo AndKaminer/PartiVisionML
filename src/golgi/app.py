@@ -729,16 +729,16 @@ def goto_frame(n_clicks, frame_idx, frames):
 # -- SAVE ANNOTATION to Roboflow --
 @app.callback(
     Output("save-annotation-status", "children"),
-    Input("roboflow-api-key", "value"),
-    Input("roboflow-workspace", "value"),
-    Input("roboflow-project-id", "value"),
     Input("btn-save-annotation", "n_clicks"),
+    State("roboflow-api-key", "value"),
+    State("roboflow-workspace", "value"),
+    State("roboflow-project-id", "value"),
     State("frame-index-input", "value"),
     State("training-frames", "data"),
     State("canvas-annotation", "json_data"),
     prevent_initial_call=True
 )
-def save_annotation(api_key, workspace, project, n_clicks, frame_idx, frames, annotation_str):
+def save_annotation(n_clicks, api_key, workspace, project, frame_idx, frames, annotation_str):
     if not frames or frame_idx<0 or frame_idx>=len(frames):
         raise PreventUpdate
     frame_b64 = frames[frame_idx]
