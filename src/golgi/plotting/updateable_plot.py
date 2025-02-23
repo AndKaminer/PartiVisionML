@@ -121,8 +121,10 @@ class UpdateablePlot:
 
     def get_img(self):
         fig = self.fig
+        fig.subplots_adjust(bottom=0.15)
         fig.canvas.draw()
-        img = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-        img  = img.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+        img = np.frombuffer(fig.canvas.tostring_argb(), dtype=np.uint8)
+        img = img.reshape(fig.canvas.get_width_height()[::-1] + (4,))  
+        img = img[:, :, 1:]  
         img = cv2.cvtColor(img,cv2.COLOR_RGB2BGR)
         return img
