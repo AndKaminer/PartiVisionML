@@ -4,20 +4,22 @@ import json
 import cv2
 import numpy as np
 import matplotlib
-matplotlib.use('Agg')  # For headless/server environments
+matplotlib.use('Agg')  
 import matplotlib.pyplot as plt
-import requests
 import tempfile
 import time
+import csv
+import re
 
-from dash import Dash, dcc, html, Input, Output, State
+from dash import Dash, dcc, html, Input, Output, State, callback_context
 import dash_bootstrap_components as dbc
-from dash_canvas import DashCanvas
+from dash import dcc
 from dash.exceptions import PreventUpdate
 from huggingface_hub import hf_hub_download
 from ultralytics import YOLO
 import roboflow
 import cv2
+import plotly.graph_objects as go
 
 from golgi import settings
 from golgi.inference import InferencePipeline
@@ -35,7 +37,7 @@ CANVAS_HEIGHT = 400
 
 def ensure_model_exists():
     """
-    Use local `models/sep13.pt` if present. Otherwise, download from Hugging Face.
+    Use local models/sep13.pt if present. Otherwise, download from Hugging Face.
     """
     if os.path.isfile(LOCAL_MODEL_PATH):
         print(f"Using existing local model at {LOCAL_MODEL_PATH}.")
@@ -57,187 +59,8 @@ MODEL_PATH = ensure_model_exists()
 
 
 #############################################
-# 2) Background Subtraction & 6-plot Tracking
+# 2) Video Tracking
 #############################################
-def background_subtraction_with_6plots(
-    input_video,
-    output_video,
-    plot_output_video,
-    model_path=None,    # currently not used for real inference, but loaded if desired
-    scaling_factor_brightness=1.0,
-    denoise=True,
-    frame_rate_override=None
-):
-    """
-    Median-based background subtraction + largest contour detection -> area/perimeter/etc.
-    Writes 2 AVIs if requested, returns list of dict for CSV.
-    """
-
-    cap = cv2.VideoCapture(input_video)
-    if not cap.isOpened():
-        raise FileNotFoundError(f"Cannot open video file: {input_video}")
-
-    frames = []
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        frames.append(gray)
-    cap.release()
-    if len(frames) == 0:
-        raise ValueError("No frames found in the input video.")
-
-    arr = np.array(frames)
-    bg = np.median(arr, axis=0).astype(np.uint8)
-    bg = cv2.medianBlur(bg, 5)
-
-    gmin, gmax = float('inf'), float('-inf')
-    float_bg = bg.astype(np.float32)
-    for f in arr:
-        diff = f.astype(np.float32) - float_bg
-        mn, mx = diff.min(), diff.max()
-        gmin = min(gmin, mn)
-        gmax = max(gmax, mx)
-
-    h, w = arr[0].shape
-    cap2 = cv2.VideoCapture(input_video)
-    fps = cap2.get(cv2.CAP_PROP_FPS)
-    cap2.release()
-    if fps <= 0:
-        fps = 25
-    if frame_rate_override and frame_rate_override > 0:
-        fps = frame_rate_override
-
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')
-    out_vid = None
-    out_plt = None
-    if output_video:
-        out_vid = cv2.VideoWriter(output_video, fourcc, fps, (w, h), True)
-    if plot_output_video:
-        out_plt = cv2.VideoWriter(plot_output_video, fourcc, fps, (1600, 400), True)
-
-    kernel = np.ones((3,3), np.uint8)
-
-    # Lists for time-series data
-    area_vals, perimeter_vals, height_vals = [], [], []
-    velocity_vals, acceleration_vals, circularity_vals = [], [], []
-    y_position_vals, time_vals = [], []
-
-    prev_cx, prev_cy, prev_v = None, None, 0
-
-    plt.ioff()
-    fig, axs = plt.subplots(1, 6, figsize=(16, 3), dpi=100, facecolor='black')
-    for ax in axs:
-        ax.set_facecolor("black")
-
-    def fig_to_bgr():
-        fig.canvas.draw()
-        ww, hh = fig.canvas.get_width_height()
-        buf = np.frombuffer(fig.canvas.tostring_argb(), dtype=np.uint8).reshape(hh, ww, 4)
-        return cv2.cvtColor(buf, cv2.COLOR_RGBA2BGR)
-
-    time_per_frame = 1.0 / fps
-
-    for i, f in enumerate(arr):
-        diff = f.astype(np.float32) - float_bg
-        if gmax == gmin:
-            norm = np.zeros_like(diff, dtype=np.uint8)
-        else:
-            norm = (diff - gmin)/(gmax - gmin)*255.0*scaling_factor_brightness
-        norm = np.clip(norm, 0, 255).astype(np.uint8)
-
-        if denoise:
-            norm = cv2.morphologyEx(norm, cv2.MORPH_OPEN, kernel)
-            norm = cv2.morphologyEx(norm, cv2.MORPH_CLOSE, kernel)
-
-        # threshold + largest contour
-        _, th = cv2.threshold(norm, 20, 255, cv2.THRESH_BINARY)
-        cnts, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        area, perimeter, bh, v, a, circ, cy_val = 0, 0, 0, 0, 0, 0, 0
-
-        if cnts:
-            c = max(cnts, key=cv2.contourArea)
-            area = cv2.contourArea(c)
-            perimeter = cv2.arcLength(c, True)
-            x, y, bw, bh = cv2.boundingRect(c)
-            M = cv2.moments(c)
-            if M["m00"] != 0:
-                cx = M["m10"] / M["m00"]
-                cy = M["m01"] / M["m00"]
-            else:
-                cx, cy = 0, 0
-
-            if prev_cx is not None:
-                v = ((cx - prev_cx)**2 + (cy - prev_cy)**2)**0.5
-                a = v - prev_v
-            prev_cx, prev_cy, prev_v = cx, cy, v
-            cy_val = cy
-            if perimeter > 0:
-                circ = 4.0 * np.pi * area / (perimeter * perimeter)
-
-        area_vals.append(area)
-        perimeter_vals.append(perimeter)
-        height_vals.append(bh)
-        velocity_vals.append(v)
-        acceleration_vals.append(a)
-        circularity_vals.append(circ)
-        y_position_vals.append(cy_val)
-        time_vals.append(i*time_per_frame)
-
-        if out_vid is not None:
-            bgr_frame = cv2.cvtColor(norm, cv2.COLOR_GRAY2BGR)
-            out_vid.write(bgr_frame)
-
-        if out_plt is not None:
-            x_vals = range(len(area_vals))
-            for ax in axs:
-                ax.clear()
-                ax.set_facecolor("black")
-                ax.tick_params(axis='x', colors='white')
-                ax.tick_params(axis='y', colors='white')
-                for spine in ax.spines.values():
-                    spine.set_color('white')
-
-            axs[0].plot(x_vals, area_vals, color='white')
-            axs[0].set_title("Area", color='white')
-            axs[1].plot(x_vals, perimeter_vals, color='white')
-            axs[1].set_title("Perimeter", color='white')
-            axs[2].plot(x_vals, height_vals, color='white')
-            axs[2].set_title("Height", color='white')
-            axs[3].plot(x_vals, velocity_vals, color='white')
-            axs[3].set_title("Velocity", color='white')
-            axs[4].plot(x_vals, acceleration_vals, color='white')
-            axs[4].set_title("Acceleration", color='white')
-            axs[5].plot(x_vals, circularity_vals, color='white')
-            axs[5].set_title("Circularity", color='white')
-
-            plot_bgr = fig_to_bgr()
-            plot_bgr = cv2.resize(plot_bgr, (1600, 400))
-            out_plt.write(plot_bgr)
-
-    if out_vid is not None:
-        out_vid.release()
-    if out_plt is not None:
-        out_plt.release()
-    plt.close(fig)
-
-    results = []
-    for i in range(len(time_vals)):
-        row = {
-            "time": time_vals[i],
-            "area": area_vals[i],
-            "perimeter": perimeter_vals[i],
-            "height": height_vals[i],
-            "velocity": velocity_vals[i],
-            "acceleration": acceleration_vals[i],
-            "circularity": circularity_vals[i],
-            "y_position": y_position_vals[i],
-        }
-        results.append(row)
-    return results
-
-
 def track_video(video_path, model, framerate, window_width, scaling_factor, um_per_pixel, output_folder, avi, csv):
     global INFERENCE_PIPELINE
 
@@ -256,12 +79,7 @@ def track_video(video_path, model, framerate, window_width, scaling_factor, um_p
     INFERENCE_PIPELINE = None
 
 
-def run_tracking_on_folder(folder_path, output_types, frame_rate):
-    """
-    For each .avi/.mp4 in folder, run background subtraction + tracking
-    and optionally output CSV, AVI videos.
-    """
-
+def run_tracking_on_folder(folder_path, output_types, frame_rate, um_per_pixel):
     processed_files = []
     if not os.path.isdir(folder_path):
         return processed_files
@@ -272,72 +90,91 @@ def run_tracking_on_folder(folder_path, output_types, frame_rate):
 
     model = YOLO(MODEL_PATH)
 
-    avi = "AVI"in output_types
+    avi = "AVI" in output_types
     csv = "CSV" in output_types
 
     for file_name in os.listdir(folder_path):
         ext = file_name.lower()
-        if not(ext.endswith('.avi') or ext.endswith('.mp4')):
+        if not (ext.endswith('.avi') or ext.endswith('.mp4')):
             continue
         input_path = os.path.join(folder_path, file_name)
 
-        track_video(input_path,
-                    model,
-                    frame_rate,
-                    settings.soft_get_setting("window_width"),
-                    settings.soft_get_setting("scaling_factor"),
-                    settings.soft_get_setting("um_per_pixel"),
-                    output_folder,
-                    avi,
-                    csv)
+        track_video(
+            input_path,
+            model,
+            frame_rate,
+            settings.soft_get_setting("window_width"),
+            settings.soft_get_setting("scaling_factor"),
+            um_per_pixel,  
+            output_folder,
+            avi,
+            csv
+        )
         
         processed_files.append(file_name)
     return processed_files
 
 
+
 #############################################
 # 3) Roboflow Annotation Upload
 #############################################
-def upload_annotation_to_roboflow(api_key, workspace, project, image_bgr, shapes, frame_index, window_width=150):
-    """
-    Upload bounding boxes for the frame (converted to .jpg in memory) to 
-    the Roboflow dataset "sep13" with your API key.
-    """
+def upload_annotation_to_roboflow(api_key, workspace, project, image_bgr, shapes, frame_index, window_width):
+    if not shapes or not isinstance(shapes, list):
+        return "Error: No annotation data found."
 
     contours = []
-    scale = 1
+    scale = 1  
+    img_height, img_width = image_bgr.shape[:2]
+
+    # Convert Dash annotation to OpenCV contours
     for s in shapes:
         if s.get("type") == "path":
-            contours.append(dash_canvas_to_opencv(s, scale))
-        elif s.get("type") == "image": # image always comes first
-            scale = s["scaleX"]
+            contour = dash_canvas_to_opencv(s, scale, img_height)
+            if contour is not None and len(contour) > 0:
+                contours.append(contour)
 
-    mask = np.zeros(image_bgr.shape, np.uint8)
-    cv2.drawContours(mask, contours, -1, (255), -1)
+    if not contours:
+        return "Error: No annotations detected."
+
+
+    contours = [np.array(c, dtype=np.int32).reshape((-1, 1, 2)) for c in contours if len(c) > 0]
+
 
     left_bound = float("inf")
     right_bound = float("-inf")
-
     for ctr in contours:
         x, _, w, _ = cv2.boundingRect(ctr)
         left_bound = min(left_bound, x)
         right_bound = max(right_bound, x + w)
-
-    left_bound = max(0, left_bound - window_width // 2)
-    right_bound = min(image_bgr.shape[1], right_bound + window_width // 2)
-
-    image_bgr = image_bgr[:, left_bound:right_bound + 1]
-    mask = mask[:, left_bound:right_bound + 1]
+    left_bound = int(max(0, left_bound - window_width // 2))
+    right_bound = int(min(img_width, right_bound + window_width // 2))
 
 
-    rf = roboflow.Roboflow(api_key=api_key)
-    project = rf.workspace(workspace).project(project)
+    cropped_image = image_bgr[:, left_bound:right_bound + 1]
+    translated_contours = [ctr - [left_bound, 0] for ctr in contours]
 
-    image_path, annotation_path, temp_dir = temp_construct_roboflow_annotation(image_bgr, mask)
 
-    project.single_upload(image_path=image_path,
-                                annotation_path=annotation_path,
-                                batch_name="batch")
+    cropped_mask = np.zeros(cropped_image.shape[:2], np.uint8)
+    cv2.drawContours(cropped_mask, translated_contours, -1, (255), -1)
+
+    debug_overlay = cropped_image.copy()
+    cv2.drawContours(debug_overlay, translated_contours, -1, (0, 255, 0), 2)
+
+    image_path, annotation_path, temp_dir = temp_construct_roboflow_annotation(cropped_image, cropped_mask)
+
+    with open(annotation_path, "r") as json_file:
+        json_content = json_file.read()
+
+    try:
+        rf = roboflow.Roboflow(api_key=api_key)
+        project = rf.workspace(workspace).project(project)
+        project.single_upload(image_path=image_path, annotation_path=annotation_path, batch_name="batch")
+        return f"Annotation for frame {frame_index} uploaded to Roboflow successfully."
+    except Exception as e:
+        print(f"Upload error: {e}")
+        return "Error: Upload failed. Check API credentials and network."
+
 
 
 def temp_construct_roboflow_annotation(image, mask):
@@ -389,7 +226,12 @@ def temp_construct_roboflow_annotation(image, mask):
 
     annotations = []
 
+    # Ensure mask is grayscale
+    if len(mask.shape) == 3:
+        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
     left_bound = float("inf")
     right_bound = float("-inf")
 
@@ -397,14 +239,14 @@ def temp_construct_roboflow_annotation(image, mask):
         annotation = {}
         contour = ctr.flatten().tolist()
         contour_pairs = [(contour[i], contour[i+1]) for i in range(0, len(contour), 2)]
-        segmentation = [int(coord) for pair in contour_pairs for coord in pair]
+        segmentation = [float(coord) for pair in contour_pairs for coord in pair]
 
         area = cv2.contourArea(ctr)
         bbox = [ int(x) for x in cv2.boundingRect(ctr) ]
         left_bound = min(left_bound, bbox[0])
         right_bound = max(right_bound, bbox[0] + bbox[2])
 
-        annotation["segmentation"] = segmentation
+        annotation["segmentation"] = [segmentation]
         annotation["area"] = area
         annotation["bbox"] = bbox
         annotation["image_id"] = 0
@@ -432,22 +274,42 @@ def temp_construct_roboflow_annotation(image, mask):
     
 
 
-def dash_canvas_to_opencv(path_object, scale):
-    path = path_object.get("path", [])
+def dash_canvas_to_opencv(path_object, scale, img_height):
+    """
+    Converts Dash Canvas-drawn SVG path string into OpenCV-compatible contour format.
+    Handles coordinate system and scaling mismatches.
+    """
+    if not path_object or "path" not in path_object:
+        return []
+
+    path_str = path_object["path"]
+    path_commands = re.findall(r'[MLZ]|\d+\.\d+', path_str)
+
+    if not path_commands:
+        return []
+
     points = []
-
-    for curve in path:
-        if curve[0] == "M" or curve[0] == "L":
-            points.append([curve[1] / scale, curve[2] / scale])
-        elif curve[0] == "Q":
-            points.append([curve[1] / scale, curve[2] / scale])
-            points.append([curve[3] / scale, curve[4] / scale])
+    i = 0
+    while i < len(path_commands):
+        cmd = path_commands[i]
+        if cmd in ["M", "L"]:
+            try:
+                x = float(path_commands[i + 1]) / scale
+                y = img_height - (float(path_commands[i + 2]) / scale) 
+                points.append([x, y])
+                i += 3
+            except (ValueError, IndexError):
+                print(f"Warning: Invalid coordinate values at {cmd}")
+                i += 1
+        elif cmd == "Z":
+            if points:
+                points.append(points[0])
+            i += 1
         else:
-            return []
+            i += 1
 
-    ctr = np.array(points).reshape((-1, 1, 2)).astype(np.int32)
+    return np.array(points).reshape((-1, 1, 2)).astype(np.int32)
 
-    return ctr
 
 
 
@@ -457,12 +319,12 @@ def dash_canvas_to_opencv(path_object, scale):
 #############################################
 app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], update_title=None)
 
-app.title = "Cell Tracking Dashboard"
+app.title = "Particle Tracking Dashboard"
 
 app.layout = dbc.Container([
     dbc.Row([
         dbc.Col([
-            html.H2("Cell Tracking Interface", className="text-primary mt-3"),
+            html.H2("Particle Tracking Interface", className="text-black mt-3"),
             html.Hr()
         ], width=12)
     ]),
@@ -470,7 +332,7 @@ app.layout = dbc.Container([
     # Huggingface section
     dbc.Row([
         dbc.Col([
-            html.H5("Huggingface API Details", className="mt-4"),
+            html.H5("Huggingface Details", className="mt-4"),
             dbc.Input(id="huggingface-rep-id", placeholder="Enter Huggingface Rep ID", type="text", className="mb-3",
                       value=settings.soft_get_setting("huggingface_repo_id")),
             dbc.Input(id="huggingface-token", placeholder="Enter Huggingface Token", type="text", className="mb-3",
@@ -480,8 +342,7 @@ app.layout = dbc.Container([
         
         # Roboflow section
         dbc.Col([
-            html.H5("Roboflow API Details", className="mt-4"),
-            dbc.Input(id="roboflow-model-name", placeholder="Enter Roboflow Model Name", type="text", className="mb-3"),
+            html.H5("Roboflow Details", className="mt-4"),
             dbc.Input(id="roboflow-api-key", placeholder="Enter Roboflow API Key", type="text", className="mb-3",
                       value=settings.soft_get_setting("roboflow_api_key")),
             dbc.Input(id="roboflow-workspace", placeholder="Enter Roboflow Workspace", type="text", className="mb-3",
@@ -504,7 +365,7 @@ app.layout = dbc.Container([
 
     # TRAINING SECTION
     dbc.Card([
-        dbc.CardHeader(html.H4("Training", className="text-white bg-primary mb-0")),
+        dbc.CardHeader(html.H4("Training", className="text-black mb-0")),
         dbc.CardBody([
             html.Div([
                 html.Label("Upload Training Video", className="fw-bold"),
@@ -531,60 +392,146 @@ app.layout = dbc.Container([
 
             dbc.Row([
                 dbc.Col([
-                    html.Button("Auto-Detect Particles", id="btn-auto-detect", n_clicks=0, className="btn btn-success"),
+                    dcc.Slider(
+                        id="frame-slider",
+                        min=0,
+                        max=100,  
+                        step=1,
+                        value=0,
+                        marks=None,
+                        tooltip={"placement": "bottom", "always_visible": True}
+                    ),
+                ], width=12),
+            ], className="mb-3"),
+
+
+
+            dbc.Row([
+                dbc.Col([
+                    html.Button(
+                        "Identify Undetectable Frames", 
+                        id="btn-auto-detect", 
+                        n_clicks=0, 
+                        className="btn btn-danger"
+                    ),
                     html.Div(id="autodetect-status", className="text-success mt-2")
-                ], width=4),
+                ], width=12)
+            ], className="mb-3"),
+
+
+            dbc.Row([
+                dbc.Col([
+                    html.Label("Frames with No Detected Contours", className="fw-bold"),
+                    dcc.Dropdown(
+                        id="no-contour-dropdown",
+                        options=[], 
+                        placeholder="Select a frame with no contours"
+                    )
+                ], width=12)
             ], className="mb-3"),
 
             dbc.Row([
                 dbc.Col([
-                    html.Label("Frame Index:", className="fw-bold"),
-                    dcc.Input(id="frame-index-input", type="number", value=0, min=0, className="form-control d-inline-block me-2", style={"width":"80px"}),
-                    html.Button("Go To Frame", id="btn-goto-frame", n_clicks=0, className="btn btn-secondary"),
-                    html.Div(id="frame-count-display", className="text-info mt-2"),
-                ], width=4),
+                    html.Label("Annotation Tool", className="fw-bold"),
+                ], width=12)
+            ], className="mb-2"),  
+
+
+            # Annotation Tool 
+            dbc.Row([
                 dbc.Col([
-                    html.Div(id="video-frame-display", style={"textAlign":"center"}),
-                ], width=8),
+                    dcc.Graph(
+                        id="annotation-graph",
+                        config={
+                            "modeBarButtonsToAdd": [
+                                "drawclosedpath",  
+                                "eraseshape", 
+                                "lasso2d",  
+                                "pan2d",  
+                                "zoomIn2d", 
+                                "zoomOut2d"                               
+                            ],
+                            "modeBarButtonsToRemove": ["resetScale2d","zoom2d","autoscale2d"],
+                            "scrollZoom": True, 
+                            "displaylogo": False  
+                            
+                        },
+                        style={"width": "100%", "height": "250px", "border": "1px solid gray"},
+                        figure=go.Figure().update_layout(
+                            autosize=True,
+                            xaxis=dict(visible=False, showgrid=False, zeroline=False),
+                            yaxis=dict(visible=False, showgrid=False, zeroline=False),
+                            margin=dict(l=0, r=0, t=0, b=0),
+                            dragmode="drawclosedpath", 
+                            plot_bgcolor="white",
+                            paper_bgcolor="white",
+                            newshape=dict(line=dict(color="red", width=1)),
+                        )
+                    )
+                ], width=12)
             ], className="mb-3"),
 
-            html.Label("Annotation Tool:", className="fw-bold"),
-            html.Div([
-                DashCanvas(
-                    id='canvas-annotation',
-                    width=CANVAS_WIDTH,
-                    height=CANVAS_HEIGHT,
-                    lineWidth=2,
-                    goButtonTitle='Done',
-                    tool='pencil'
-                ),
-            ], className="border border-secondary mb-2", style={"display":"inline-block"}),
 
-            html.Button("Save Annotation", id="btn-save-annotation", n_clicks=0, className="btn btn-warning"),
-            html.Div(id="save-annotation-status", className="text-success mt-2"),
+            dbc.Row([
+                dbc.Col([
+                    html.Button("Save Annotation", id="btn-save-annotation", n_clicks=0, className="btn btn-warning"),
+                ], width="auto")
+            ], className="mt-3"),  # Moves the button to a new row
+
+            dbc.Row([
+                dbc.Col([
+                    html.Div(id="save-annotation-status", className="text-success mt-2"),
+    ])
+]),
+
+
+
+
         ])
     ], className="my-3"),
 
     # TRACKING SECTION
     dbc.Card([
-        dbc.CardHeader(html.H4("Tracking", className="text-white bg-primary mb-0")),
+        dbc.CardHeader(html.H4("Tracking", className="text-black mb-0")),
         dbc.CardBody([
             dbc.Row([
                 dbc.Col([
                     html.Label("Folder Path for Videos", className="fw-bold"),
-                    dcc.Input(id="tracking-folder-path", type="text", placeholder=r"C:\my_videos", className="form-control",
-                              value=settings.soft_get_setting("video_folder"))
+                    dcc.Input(
+                        id="tracking-folder-path",
+                        type="text",
+                        placeholder=r"C:\my_videos",
+                        className="form-control",
+                        value=settings.soft_get_setting("video_folder")
+                    )
                 ], width=6),
                 dbc.Col([
-                    html.Label("Frame Rate Override (optional)", className="fw-bold"),
-                    dcc.Input(id="tracking-frame-rate", type="number", placeholder="25", className="form-control",
-                              value=settings.soft_get_setting("framerate") )
+                    html.Label("Frame Rate (μs/frame)", className="fw-bold"),
+                    dcc.Input(
+                        id="tracking-frame-rate",
+                        type="number",
+                        placeholder="25",
+                        className="form-control",
+                        value=settings.soft_get_setting("framerate")
+                    )
+                ], width=3),
+                dbc.Col([
+                    html.Label("Pixel Size (μm/pixel)", className="fw-bold"),
+                    dcc.Input(
+                        id="tracking-um-per-pixel",
+                        type="number",
+                        placeholder="1.0",
+                        className="form-control",
+                        value=settings.soft_get_setting("um_per_pixel")
+                    )
                 ], width=3),
             ], className="mb-3"),
 
             dbc.Row([
                 dbc.Col([
-                    html.Label("Export Options:", className="fw-bold"),
+                    html.Label("Export Options:", className="fw-bold me-3"),
+                ], width="auto", className="d-flex align-items-center"),
+                dbc.Col([
                     dbc.Checklist(
                         options=[
                             {"label": "CSV", "value": "CSV"},
@@ -593,25 +540,35 @@ app.layout = dbc.Container([
                         value=["CSV", "AVI"],
                         id="export-options",
                         inline=True,
-                        className="mb-2"
+                        className="ms-2"
                     )
-                ], width=3),
+                ], width="auto", className="d-flex align-items-center"),
+            ], className="mb-3"),
+
+            dbc.Row([
                 dbc.Col([
-                    html.Button("Run Tracking", id="btn-run-tracking", n_clicks=0, className="btn btn-danger")
-                ], width=2),
-                dbc.Col([
-                    dbc.Progress(id="tracking-progress", value=0, striped=True, animated=True, style={"height":"30px"}),
-                    dcc.Interval(id="progress-interval", n_intervals=0, interval=500)
-                ], width=7),
-            ]),
+                    html.Button(
+                        "Run Tracking",
+                        id="btn-run-tracking",
+                        n_clicks=0,
+                        className="btn btn-success px-4"
+                    ),
+                ], width="auto", className="d-flex align-items-center"),
+            ], className="mb-3 d-flex align-items-center"),
 
             html.Div(id="tracking-status", className="text-info mt-2"),
         ])
-    ], className="my-3"),
+], className="my-3"),
 
-    dcc.Store(id='training-frames', data=[]),
-    dcc.Store(id='autodetected-bboxes', data={}),
+
+
+dcc.Store(id='training-frames', data=[]),
+dcc.Store(id='autodetected-bboxes', data={}),
+dcc.Store(id='processed-frames', data=[]),
+dcc.Store(id='uploaded-video-path', data=""),
+dcc.Store(id='no-contour-indices', data=[]),
 ], fluid=True)
+
 
 
 #############################################
@@ -622,128 +579,203 @@ app.layout = dbc.Container([
 @app.callback(
     Output("training-frames", "data"),
     Output("train-video-status", "children"),
-    Output("canvas-annotation", "width"),
-    Output("canvas-annotation", "height"),
+    Output("frame-slider", "max"),   
+    Output("uploaded-video-path", "data"),
     Input("upload-training-video", "contents"),
     prevent_initial_call=True
 )
 def on_training_video_upload(contents):
     if not contents:
         raise PreventUpdate
+
     content_type, content_string = contents.split(',')
     decoded = base64.b64decode(content_string)
-    temp_filename = 'temp_training_video.avi'
-    with open(temp_filename, 'wb') as f:
-        f.write(decoded)
 
-    cap = cv2.VideoCapture(temp_filename)
+    temp_file = tempfile.NamedTemporaryFile(suffix=".avi", delete=False)
+    temp_file.write(decoded)
+    temp_file.close()
+    temp_video_path = temp_file.name
+
+    cap = cv2.VideoCapture(temp_video_path)
     frames_data = []
-    success = True
-    width = height = 0
-    while success:
+    
+    while True:
         success, frame = cap.read()
         if not success:
             break
-        height, width = frame.shape[0], frame.shape[1]
-        # Convert to jpg base64
         _, buffer = cv2.imencode('.jpg', frame)
-        
-        b64_frame = base64.b64encode(buffer).decode('utf-8')
-        frames_data.append(b64_frame)
-
+        frame_b64 = base64.b64encode(buffer).decode('utf-8')
+        frames_data.append(frame_b64)
     cap.release()
-    os.remove(temp_filename)
+
+    if not frames_data:
+        return [], "Error: No frames extracted from video.", 0, ""
+
     status = f"Uploaded video with {len(frames_data)} frames."
-    return frames_data, status, width, height
+    return frames_data, status, len(frames_data) - 1, temp_video_path
 
 
-# -- AUTO-DETECT PARTICLES (naive) --
+
 @app.callback(
-    Output("autodetected-bboxes", "data"),
+    Output("processed-frames", "data"),
+    Output("no-contour-indices", "data"),
     Output("autodetect-status", "children"),
     Input("btn-auto-detect", "n_clicks"),
     State("training-frames", "data"),
     prevent_initial_call=True
 )
-def auto_detect_particles(n_clicks, frames):
+def run_full_inference(n_clicks, frames):
     if not frames:
         raise PreventUpdate
 
-    # Quick approach: do median background of all frames, get largest contour per frame
-    autodetected = {}
-    gray_frames = []
+    # Save the training frames to a temporary video file
+    temp_video_path = os.path.join(tempfile.gettempdir(), "temp_auto_detect.avi")
+    first_frame = cv2.imdecode(np.frombuffer(base64.b64decode(frames[0]), np.uint8), cv2.IMREAD_COLOR)
+    height, width, _ = first_frame.shape
+    fps = 25  # adjust if needed
+    fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+    out_video = cv2.VideoWriter(temp_video_path, fourcc, fps, (width, height))
     for f_b64 in frames:
-        dec = base64.b64decode(f_b64)
-        arr = np.frombuffer(dec, np.uint8)
-        im = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
-        gray_frames.append(gray)
+        decoded = base64.b64decode(f_b64)
+        np_arr = np.frombuffer(decoded, np.uint8)
+        img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        out_video.write(img)
+    out_video.release()
 
-    arr = np.array(gray_frames)
-    bg = np.median(arr, axis=0).astype(np.uint8)
-    bg = cv2.medianBlur(bg, 5)
-    float_bg = bg.astype(np.float32)
 
-    gmin, gmax = float('inf'), float('-inf')
-    for g in arr:
-        df = g.astype(np.float32) - float_bg
-        mn, mx = df.min(), df.max()
-        gmin = min(gmin, mn)
-        gmax = max(gmax, mx)
+    output_folder = tempfile.mkdtemp()
 
-    kernel = np.ones((3,3), np.uint8)
+    pipeline = InferencePipeline(
+        model=YOLO(MODEL_PATH),
+        framerate=fps,
+        window_width=settings.soft_get_setting("window_width"),
+        scaling_factor=settings.soft_get_setting("scaling_factor"),
+        um_per_pixel=settings.soft_get_setting("um_per_pixel"),
+        output_folder=output_folder
+    )
 
-    for i, gf in enumerate(arr):
-        df = gf.astype(np.float32) - float_bg
-        if gmax != gmin:
-            norm = (df-gmin)/(gmax-gmin)*255
-        else:
-            norm = np.zeros_like(df)
-        norm = np.clip(norm, 0, 255).astype(np.uint8)
-        norm = cv2.morphologyEx(norm, cv2.MORPH_OPEN, kernel)
-        norm = cv2.morphologyEx(norm, cv2.MORPH_CLOSE, kernel)
-        _, th = cv2.threshold(norm, 20, 255, cv2.THRESH_BINARY)
-        cnts, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if cnts:
-            c = max(cnts, key=cv2.contourArea)
-            x, y, w, h = cv2.boundingRect(c)
-            autodetected[i] = [(x, y, w, h)]
-        else:
-            autodetected[i] = []
+    pipeline.process_video(temp_video_path, avi=True, csv=True, include_plots=False)
 
-    msg = f"Auto-detected bounding boxes for {len(frames)} frames."
-    return autodetected, msg
+
+    processed_video_path = os.path.join(output_folder, "temp_auto_detect-analysis.avi")
+    processed_frames = []
+    cap = cv2.VideoCapture(processed_video_path)
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        _, buffer = cv2.imencode('.jpg', frame)
+        frame_b64 = base64.b64encode(buffer).decode('utf-8')
+        processed_frames.append(frame_b64)
+    cap.release()
+
+
+    csv_path = os.path.join(output_folder, "temp_auto_detect-analysis.csv")
+    no_contour_indices = []
+    try:
+        with open(csv_path, newline="") as csvfile:
+            reader = csv.DictReader(csvfile)
+            for idx, row in enumerate(reader):
+                try:
+                    area = float(row.get("area", 0))
+                except Exception:
+                    area = 0
+                if area == 0:
+                    no_contour_indices.append(idx)
+    except Exception as e:
+        no_contour_indices = []
+
+    os.remove(temp_video_path)
+    return processed_frames, no_contour_indices, "Auto-detection complete and video updated with tracked contours."
+
 
 
 # -- GO TO FRAME & DISPLAY --
 @app.callback(
-    Output("frame-count-display", "children"),
-    Output("video-frame-display", "children"),
-    Output("canvas-annotation", "image_content"),
-    Output("canvas-annotation", "json_data"),
-    Input("btn-goto-frame", "n_clicks"),
-    State("frame-index-input", "value"),
+    Output("annotation-graph", "figure"),
+    Output("frame-slider", "value"),
+    Output("autodetected-bboxes", "data"),
+    Input("frame-slider", "value"),
+    Input("no-contour-dropdown", "value"),
     State("training-frames", "data"),
+    State("processed-frames", "data"),
+    State("annotation-graph", "relayoutData"),
     prevent_initial_call=True
 )
-def goto_frame(n_clicks, frame_idx, frames):
-    if not frames or frame_idx < 0 or frame_idx >= len(frames):
+def update_annotation_display(slider_value, dropdown_value, training_frames, processed_frames, relayout_data):
+    frames = processed_frames if processed_frames and len(processed_frames) > 0 else training_frames
+    if not frames:
         raise PreventUpdate
 
-    count_text = f"Frame {frame_idx} of {len(frames)-1}"
-    frame_b64 = frames[frame_idx]
+    ctx = callback_context
+    if not ctx.triggered:
+        raise PreventUpdate
+    trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
 
-    # DashCanvas expects "image_content" as a data URI for annotations
-    canvas_content = "data:image/jpg;base64," + frame_b64
+    if trigger_id == "frame-slider":
+        frame_idx = slider_value
+    elif trigger_id == "no-contour-dropdown" and dropdown_value is not None:
+        frame_idx = dropdown_value
+    else:
+        frame_idx = slider_value
 
-    # For "json_data", dash-canvas expects a string (JSON). We'll pass an empty "objects" list
-    return (
-        count_text,
-        # Remove the large image display here
-        None,
-        canvas_content,
-        json.dumps({"objects": []})  # Empty objects for annotation tool
+    frame_idx = max(0, min(len(frames) - 1, frame_idx))
+    f_b64 = frames[frame_idx]
+    decoded = base64.b64decode(f_b64)
+    np_arr = np.frombuffer(decoded, np.uint8)
+    img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+    autodetected = {} 
+
+    fig = go.Figure()
+    fig.add_layout_image(
+        dict(
+            source=f"data:image/jpg;base64,{f_b64}",
+            x=0,
+            y=img.shape[0],
+            xref="x",
+            yref="y",
+            sizex=img.shape[1],
+            sizey=img.shape[0],
+            xanchor="left",
+            yanchor="top",
+            layer="below"
+        )
     )
+
+    if relayout_data and "xaxis.range" in relayout_data and "yaxis.range" in relayout_data:
+        x_range = relayout_data["xaxis.range"]
+        y_range = relayout_data["yaxis.range"]
+    else:
+        x_range = [0, img.shape[1]]
+        y_range = [0, img.shape[0]]
+
+    fig.update_layout(
+        autosize=True,
+        xaxis=dict(visible=False, showgrid=False, zeroline=False, range=x_range, scaleanchor="y"),
+        yaxis=dict(visible=False, showgrid=False, zeroline=False, range=y_range, scaleanchor="x"),
+        margin=dict(l=0, r=0, t=0, b=0),
+        dragmode="pan",
+        plot_bgcolor="white",
+        paper_bgcolor="white"
+    )
+
+    return fig, frame_idx, autodetected
+
+
+
+@app.callback(
+    Output("no-contour-dropdown", "options"),
+    Input("no-contour-indices", "data"),
+    prevent_initial_call=True
+)
+def update_no_contour_dropdown_from_inference(no_contour_indices):
+    if no_contour_indices is None:
+        raise PreventUpdate
+    options = [{"label": f"Frame {i}", "value": i} for i in no_contour_indices]
+    return options
+
+
 
 
 # -- SAVE ANNOTATION to Roboflow --
@@ -753,66 +785,52 @@ def goto_frame(n_clicks, frame_idx, frames):
     State("roboflow-api-key", "value"),
     State("roboflow-workspace", "value"),
     State("roboflow-project-id", "value"),
-    State("frame-index-input", "value"),
+    State("frame-slider", "value"),
     State("training-frames", "data"),
-    State("canvas-annotation", "json_data"),
+    State("annotation-graph", "figure"),  
     prevent_initial_call=True
 )
-def save_annotation(n_clicks, api_key, workspace, project, frame_idx, frames, annotation_str):
-    if not frames or frame_idx<0 or frame_idx>=len(frames):
+def save_annotation(n_clicks, api_key, workspace, project, frame_idx, frames, figure):
+    if not frames or frame_idx < 0 or frame_idx >= len(frames):
         raise PreventUpdate
+    
+
+    shapes = figure.get("layout", {}).get("shapes", None)
+    if not shapes:
+        return "Error: No annotation data found."
+
     frame_b64 = frames[frame_idx]
     dec = base64.b64decode(frame_b64)
-    arr = np.frombuffer(dec, np.uint8)
-    frame_bgr = cv2.imdecode(arr, 0)
+    np_arr = np.frombuffer(dec, np.uint8)
+    frame_bgr = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
-    # annotation_str is a JSON string
-    try:
-        ann_data = json.loads(annotation_str)
-    except:
-        ann_data = {"objects":[]}
+    upload_result = upload_annotation_to_roboflow(api_key, workspace, project, frame_bgr, shapes, frame_idx, settings.soft_get_setting("window_width"))
+    return upload_result
 
-    shapes = ann_data.get("objects", [])
-    upload_annotation_to_roboflow(api_key, workspace, project, frame_bgr, shapes, frame_idx, settings.soft_get_setting("window_width"))
-    return f"Annotation for frame {frame_idx} uploaded to Roboflow successfully."
+
+
 
 
 # -- RUN TRACKING ON A FOLDER --
 @app.callback(
-    Output("tracking-progress", "value", allow_duplicate=True),
-    Output("tracking-progress", "label", allow_duplicate=True),
     Output("tracking-status", "children"),
     Input("btn-run-tracking", "n_clicks"),
     State("tracking-folder-path", "value"),
     State("export-options", "value"),
     State("tracking-frame-rate", "value"),
+    State("tracking-um-per-pixel", "value"), 
     prevent_initial_call=True
 )
-def run_tracking(n_clicks, folder_path, export_values, frame_rate):
+def run_tracking(n_clicks, folder_path, export_values, frame_rate, um_per_pixel):
     if not folder_path:
         raise PreventUpdate
 
-    processed = run_tracking_on_folder(folder_path, export_values, frame_rate)
+    processed = run_tracking_on_folder(folder_path, export_values, frame_rate, um_per_pixel)
     if not processed:
-        return (0, "0%", "No videos processed. Check folder path or no .avi/.mp4 found.")
+        return "No videos processed. Check folder path or no .avi/.mp4 found."
 
-    return (100, "100%", f"Processing complete: {processed}")
+    return "All videos processed!"
 
-
-# -- UPDATE PROGRESS BAR --
-@app.callback(
-    Output("tracking-progress", "value"),
-    Output("tracking-progress", "label"),
-    Input("progress-interval", "n_intervals"),
-    Input("tracking-progress", "value"),
-    Input("tracking-progress", "label"))
-def update_progress(n, value, label):
-    if INFERENCE_PIPELINE == None:
-        return value, label
-
-    progress = int(INFERENCE_PIPELINE.progress * 100)
-
-    return progress, f"{progress}%" if progress >= 5 else ""
 
 
 
