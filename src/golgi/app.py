@@ -387,7 +387,7 @@ app.layout = dbc.Container([
                     },
                     multiple=False
                 ),
-                html.Div(id="train-video-status", className="text-info mb-3"),
+                html.Div(id="train-video-status", className="text-secondary mb-3"),
             ]),
 
             dbc.Row([
@@ -414,7 +414,7 @@ app.layout = dbc.Container([
                         n_clicks=0, 
                         className="btn btn-danger"
                     ),
-                    html.Div(id="autodetect-status", className="text-success mt-2")
+                    html.Div(id="autodetect-status", className="text-secondary mt-2")
                 ], width=12)
             ], className="mb-3"),
 
@@ -476,11 +476,11 @@ app.layout = dbc.Container([
                 dbc.Col([
                     html.Button("Save Annotation", id="btn-save-annotation", n_clicks=0, className="btn btn-warning"),
                 ], width="auto")
-            ], className="mt-3"),  # Moves the button to a new row
+            ], className="mt-3"),  
 
             dbc.Row([
                 dbc.Col([
-                    html.Div(id="save-annotation-status", className="text-success mt-2"),
+                    html.Div(id="save-annotation-status", className="text-secondary mt-2"),
     ])
 ]),
 
@@ -556,7 +556,7 @@ app.layout = dbc.Container([
                 ], width="auto", className="d-flex align-items-center"),
             ], className="mb-3 d-flex align-items-center"),
 
-            html.Div(id="tracking-status", className="text-info mt-2"),
+            html.Div(id="tracking-status", className="text-secondary mt-2"),
         ])
 ], className="my-3"),
 
@@ -686,7 +686,7 @@ def run_full_inference(n_clicks, frames):
         no_contour_indices = []
 
     os.remove(temp_video_path)
-    return processed_frames, no_contour_indices, "Auto-detection complete and video updated with tracked contours."
+    return processed_frames, no_contour_indices, "Detection complete and video updated with tracked contours."
 
 
 
