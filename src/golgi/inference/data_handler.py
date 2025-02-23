@@ -29,13 +29,13 @@ class DataHandler:
             'centerX' : None}
 
         self.plot = UpdateablePlot(6, 3.2, 'scatter') if scatter else UpdateablePlot(7, 3.2, 'plot')
-        self.plot.set_subplot_chars(0, "Area", "Time (us)", "Area (um^2)")
-        self.plot.set_subplot_chars(1, "Perimeter", "Time (us)",  "Perimeter (um)")
-        self.plot.set_subplot_chars(2, "Height", "Time (us)", "Height (um)")
-        self.plot.set_subplot_chars(3, "Velocity", "Time (us)", "Velocity (um/s)")
-        self.plot.set_subplot_chars(4, "Acceleration", "Time (us)", "Acceleration (um/s^2)")
-        self.plot.set_subplot_chars(5, "Circularity", "Time (us)", "Circularity")
-        self.plot.set_subplot_chars(6, "Y Position", "Time (us)", "Y Position (um/s^2)")
+        self.plot.set_subplot_chars(0, "Area", "Time (μs)", "Area (μm^2)")
+        self.plot.set_subplot_chars(1, "Perimeter", "Time (μs)",  "Perimeter (μm)")
+        self.plot.set_subplot_chars(2, "Height", "Time (μs)", "Height (μm)")
+        self.plot.set_subplot_chars(3, "Velocity", "Time (μs)", "Velocity (μm/s)")
+        self.plot.set_subplot_chars(4, "Acceleration", "Time (μs)", "Acceleration (μm/s^2)")
+        self.plot.set_subplot_chars(5, "Circularity", "Time (μs)", "Circularity")
+        self.plot.set_subplot_chars(6, "Y-Position", "Time (μs)", "Y-Position (μm/s^2)")
 
 
     def update_data(self, area, perimeter, height, circularity, ypos, centerX=None):
