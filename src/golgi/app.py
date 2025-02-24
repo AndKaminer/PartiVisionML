@@ -1,3 +1,4 @@
+
 import os
 import base64
 import json
@@ -158,8 +159,9 @@ def upload_annotation_to_roboflow(api_key, workspace, project, image_bgr, shapes
     cropped_mask = np.zeros(cropped_image.shape[:2], np.uint8)
     cv2.drawContours(cropped_mask, translated_contours, -1, (255), -1)
 
-    debug_overlay = cropped_image.copy()
+    debug_overlay = np.ascontiguousarray(cropped_image.copy())
     cv2.drawContours(debug_overlay, translated_contours, -1, (0, 255, 0), 2)
+
 
     image_path, annotation_path, temp_dir = temp_construct_roboflow_annotation(cropped_image, cropped_mask)
 
@@ -700,18 +702,14 @@ def run_full_inference(n_clicks, frames):
     State("training-frames", "data"),
     State("processed-frames", "data"),
     State("annotation-graph", "relayoutData"),
+    State("no-contour-indices", "data"),
     prevent_initial_call=True
 )
-def update_annotation_display(slider_value, dropdown_value, training_frames, processed_frames, relayout_data):
-    frames = processed_frames if processed_frames and len(processed_frames) > 0 else training_frames
-    if not frames:
-        raise PreventUpdate
-
+def update_annotation_display(slider_value, dropdown_value, training_frames, processed_frames, relayout_data, no_contour_indices):
     ctx = callback_context
     if not ctx.triggered:
         raise PreventUpdate
     trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
-
     if trigger_id == "frame-slider":
         frame_idx = slider_value
     elif trigger_id == "no-contour-dropdown" and dropdown_value is not None:
@@ -719,18 +717,26 @@ def update_annotation_display(slider_value, dropdown_value, training_frames, pro
     else:
         frame_idx = slider_value
 
-    frame_idx = max(0, min(len(frames) - 1, frame_idx))
-    f_b64 = frames[frame_idx]
-    decoded = base64.b64decode(f_b64)
+    frame_idx = max(0, min(len(training_frames) - 1, frame_idx))
+    
+
+    if no_contour_indices and frame_idx in no_contour_indices:
+        frame_b64 = training_frames[frame_idx]
+    else:
+        if processed_frames and len(processed_frames) > 0:
+            frame_b64 = processed_frames[frame_idx]
+        else:
+            frame_b64 = training_frames[frame_idx]
+
+    decoded = base64.b64decode(frame_b64)
     np_arr = np.frombuffer(decoded, np.uint8)
     img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-
-    autodetected = {} 
+    
 
     fig = go.Figure()
     fig.add_layout_image(
         dict(
-            source=f"data:image/jpg;base64,{f_b64}",
+            source=f"data:image/jpg;base64,{frame_b64}",
             x=0,
             y=img.shape[0],
             xref="x",
@@ -742,6 +748,7 @@ def update_annotation_display(slider_value, dropdown_value, training_frames, pro
             layer="below"
         )
     )
+
 
     if relayout_data and "xaxis.range" in relayout_data and "yaxis.range" in relayout_data:
         x_range = relayout_data["xaxis.range"]
@@ -760,7 +767,8 @@ def update_annotation_display(slider_value, dropdown_value, training_frames, pro
         paper_bgcolor="white"
     )
 
-    return fig, frame_idx, autodetected
+    return fig, frame_idx, {}
+
 
 
 
