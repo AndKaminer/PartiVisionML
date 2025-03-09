@@ -30,8 +30,9 @@ from golgi.annotation import AnnotatedImage
 # 1) Check / Download Model from Hugging Face
 #############################################
 
+
 MODELS_FOLDER = os.path.join(os.getcwd(), "models")
-LOCAL_MODEL_PATH = os.path.join(MODELS_FOLDER, settings.soft_get_setting("model_name"))
+LOCAL_MODEL_PATH = os.path.join(MODELS_FOLDER, settings.soft_get_setting("model_name", ""))
 INFERENCE_PIPELINE = None
 CANVAS_WIDTH = 400
 CANVAS_HEIGHT = 400
