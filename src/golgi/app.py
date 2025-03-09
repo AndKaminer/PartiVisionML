@@ -11,6 +11,7 @@ import tempfile
 import time
 import csv
 import re
+import datetime
 
 from dash import Dash, dcc, html, Input, Output, State, callback_context
 import dash_bootstrap_components as dbc
@@ -32,10 +33,54 @@ from golgi.annotation import AnnotatedImage
 
 
 MODELS_FOLDER = os.path.join(os.getcwd(), "models")
-LOCAL_MODEL_PATH = os.path.join(MODELS_FOLDER, settings.soft_get_setting("model_name", ""))
+LOCAL_MODEL_PATH = os.path.join(MODELS_FOLDER, settings.soft_get_setting("model_name", "NOTFOUND"))
 INFERENCE_PIPELINE = None
 CANVAS_WIDTH = 400
 CANVAS_HEIGHT = 400
+
+
+def parse_model_date(name):
+    if not name.endswith(".pt"):
+        raise Exception("Invalid filetype")
+
+    name = name[:-3]
+
+    split = last_name.split("-")
+    if len(split) < 3:
+        raise Exception("Date not found")
+
+    day, month, year = split[-3], split[-2], split[-1]
+
+    return datetime.date(year, month, day)
+
+
+def hasdate(name):
+    if not name.endswith(".pt"):
+        raise Exception("Invalid filetype")
+
+    name = name[:-3]
+
+    split = last_name.split("-")
+
+    if len(split) < 3:
+        return False
+
+    day, month, year = split[-3], split[-2], split[-1]
+
+    return day.isdigit() and month.isdigit() and year.isdigit():
+
+
+def get_most_recent_model():
+    
+    files = [ f for f in list_repo_files(repo_id=settings.soft_get_setting("huggingface_repo_id"),
+                              token=settings.soft_get_setting("huggingface_token")) if f.endswith(".pt") ]
+
+    files = [ f for f in files if hasdate(f) ]
+
+    files.sort(key=parse_model_date)
+
+    return files[-1]
+
 
 def ensure_model_exists():
     """
