@@ -49,8 +49,8 @@ def get_setting(setting_name):
 
     return settings[setting_name]
 
-def soft_get_setting(setting_name):
-    return settings.get(setting_name, None)
+def soft_get_setting(setting_name, default=None):
+    return settings.get(setting_name, default)
 
 def get_settings_path(settings_path_path):
     try:
