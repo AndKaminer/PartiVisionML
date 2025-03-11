@@ -1,4 +1,3 @@
-
 import os
 import base64
 import json
@@ -26,6 +25,7 @@ import plotly.graph_objects as go
 from golgi import settings
 from golgi.inference import InferencePipeline
 from golgi.annotation import AnnotatedImage
+from date_utils import parse_model_date
 
 #############################################
 # 1) Check / Download Model from Hugging Face
@@ -37,72 +37,50 @@ LOCAL_MODEL_PATH = os.path.join(MODELS_FOLDER, settings.soft_get_setting("model_
 INFERENCE_PIPELINE = None
 CANVAS_WIDTH = 400
 CANVAS_HEIGHT = 400
+MODEL_FOUND = False
+MODEL_PATH = None
 
 
-def parse_model_date(name):
-    if not name.endswith(".pt"):
-        raise Exception("Invalid filetype")
-
-    name = name[:-3]
-
-    split = last_name.split("-")
-    if len(split) < 3:
-        raise Exception("Date not found")
-
-    day, month, year = split[-3], split[-2], split[-1]
-
-    return datetime.date(year, month, day)
-
-
-def hasdate(name):
-    if not name.endswith(".pt"):
-        raise Exception("Invalid filetype")
-
-    name = name[:-3]
-
-    split = last_name.split("-")
-
-    if len(split) < 3:
-        return False
-
-    day, month, year = split[-3], split[-2], split[-1]
-
-    return day.isdigit() and month.isdigit() and year.isdigit():
-
-
-def get_most_recent_model():
+def get_most_recent_model(repo_id, token):
     
-    files = [ f for f in list_repo_files(repo_id=settings.soft_get_setting("huggingface_repo_id"),
-                              token=settings.soft_get_setting("huggingface_token")) if f.endswith(".pt") ]
-
-    files = [ f for f in files if hasdate(f) ]
+    files = [ f for f in huggingface_hub.list_repo_files(repo_id=repo_id, token=token) if (f.endswith(".pt")
+                                                                                           and hasdate(f)) ]
 
     files.sort(key=parse_model_date)
 
     return files[-1]
 
+def ensure_model_exists(repo_id, token):
+    global MODEL_FOUND
+    global MODEL_PATH
 
-def ensure_model_exists():
-    """
-    Use local models/sep13.pt if present. Otherwise, download from Hugging Face.
-    """
-    if os.path.isfile(LOCAL_MODEL_PATH):
+    if MODEL_FOUND:
+        return MODEL_PATH
+
+    if LOCAL_MODEL_PATH.endswith(".pt") and os.path.isfile(LOCAL_MODEL_PATH):
         print(f"Using existing local model at {LOCAL_MODEL_PATH}.")
-        return LOCAL_MODEL_PATH
+        MODEL_FOUND = True
+        MODEL_PATH = LOCAL_MODEL_PATH
     else:
-        print(f"Local model not found at {LOCAL_MODEL_PATH}. Downloading from HuggingFace...")
+        print(f"Local model not found at {LOCAL_MODEL_PATH}. Downloading most recent model from HuggingFace...")
         os.makedirs(MODELS_FOLDER, exist_ok=True)
-        downloaded_file = hf_hub_download(
-repo_id=settings.soft_get_setting("huggingface_repo_id"),
-            filename=settings.soft_get_setting("model_name"),
-token=settings.soft_get_setting("huggingface_token"),
-            local_dir=MODELS_FOLDER
-        )
-        # Move downloaded file to "models/sep13.pt"
-        print(f"Model downloaded and stored at {LOCAL_MODEL_PATH}.")
-        return LOCAL_MODEL_PATH
+        try:
+            most_recent_model = get_most_recent_model(repo_id, token)
+        except Exception:
+            raise Exception("Couldn't find a model to download. Check your huggingface information.")
 
-MODEL_PATH = ensure_model_exists()
+        downloaded_file = hf_hub_download(
+                repo_id=repo_id,
+                filename=most_recent_model,
+                token=token,
+                local_dir=MODELS_FOLDER)
+
+        MODEL_FOUND = True
+        MODEL_PATH = os.path.join(MODELS_FOLDER, os.path.basename(most_recent_file))
+
+        print(f"Model downloaded and stored at {MODEL_PATH}")
+
+    return MODEL_PATH
 
 
 #############################################
