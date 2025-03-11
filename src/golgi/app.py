@@ -104,7 +104,7 @@ def track_video(video_path, model, framerate, window_width, scaling_factor, um_p
     INFERENCE_PIPELINE = None
 
 
-def run_tracking_on_folder(folder_path, output_types, frame_rate, um_per_pixel):
+def run_tracking_on_folder(folder_path, output_types, frame_rate, um_per_pixel, repo_id, token):
     processed_files = []
     if not os.path.isdir(folder_path):
         return processed_files
@@ -113,7 +113,7 @@ def run_tracking_on_folder(folder_path, output_types, frame_rate, um_per_pixel):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
-    model = YOLO(MODEL_PATH)
+    model = YOLO(ensure_model_exists(repo_id, token))
 
     avi = "AVI" in output_types
     csv = "CSV" in output_types
@@ -648,9 +648,11 @@ def on_training_video_upload(contents):
     Output("autodetect-status", "children"),
     Input("btn-auto-detect", "n_clicks"),
     State("training-frames", "data"),
+    State("huggingface-rep-id", "value"),
+    State("huggingface-token", "value")
     prevent_initial_call=True
 )
-def run_full_inference(n_clicks, frames):
+def run_full_inference(n_clicks, frames, repo_id, token):
     if not frames:
         raise PreventUpdate
 
@@ -672,7 +674,7 @@ def run_full_inference(n_clicks, frames):
     output_folder = tempfile.mkdtemp()
 
     pipeline = InferencePipeline(
-        model=YOLO(MODEL_PATH),
+        model=YOLO(ensure_model_exists(repo_id, token)),
         framerate=fps,
         window_width=settings.soft_get_setting("window_width"),
         scaling_factor=settings.soft_get_setting("scaling_factor"),
@@ -841,8 +843,6 @@ def save_annotation(n_clicks, api_key, workspace, project, frame_idx, frames, fi
 
 
 
-
-
 # -- RUN TRACKING ON A FOLDER --
 @app.callback(
     Output("tracking-status", "children"),
@@ -851,19 +851,19 @@ def save_annotation(n_clicks, api_key, workspace, project, frame_idx, frames, fi
     State("export-options", "value"),
     State("tracking-frame-rate", "value"),
     State("tracking-um-per-pixel", "value"), 
+    State("huggingface-rep-id", "value"),
+    State("huggingface-token", "value")
     prevent_initial_call=True
 )
-def run_tracking(n_clicks, folder_path, export_values, frame_rate, um_per_pixel):
+def run_tracking(n_clicks, folder_path, export_values, frame_rate, um_per_pixel, repo_id, token):
     if not folder_path:
         raise PreventUpdate
 
-    processed = run_tracking_on_folder(folder_path, export_values, frame_rate, um_per_pixel)
+    processed = run_tracking_on_folder(folder_path, export_values, frame_rate, um_per_pixel, repo_id, token)
     if not processed:
         return "No videos processed. Check folder path or no .avi/.mp4 found."
 
     return "All videos processed!"
-
-
 
 
 def main():
