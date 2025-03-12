@@ -581,6 +581,10 @@ app.layout = dbc.Container([
                         className="btn btn-success px-4"
                     ),
                 ], width="auto", className="d-flex align-items-center"),
+                dbc.Col([
+                    dbc.Progress(id="tracking-progress", value=0, striped=True, animated=True, style={"height":"30px"}),
+                    dcc.Interval(id="progress-interval", n_intervals=0, interval=500)
+                ], width=7),
             ], className="mb-3 d-flex align-items-center"),
 
             html.Div(id="tracking-status", className="text-secondary mt-2"),
@@ -846,6 +850,8 @@ def save_annotation(n_clicks, api_key, workspace, project, frame_idx, frames, fi
 
 # -- RUN TRACKING ON A FOLDER --
 @app.callback(
+    Output("tracking-progress", "value", allow_duplicate=True),
+    Output("tracking-progress", "label", allow_duplicate=True),
     Output("tracking-status", "children"),
     Input("btn-run-tracking", "n_clicks"),
     State("tracking-folder-path", "value"),
@@ -865,6 +871,21 @@ def run_tracking(n_clicks, folder_path, export_values, frame_rate, um_per_pixel,
         return "No videos processed. Check folder path or no .avi/.mp4 found."
 
     return "All videos processed!"
+
+
+@app.callback(
+    Output("tracking-progress", "value"),
+    Output("tracking-progress", "label"),
+    Input("progress-interval", "n_intervals"),
+    Input("tracking-progress", "value"),
+    Input("tracking-progress", "label"))
+def update_progress(n, value, label):
+    if INFERENCE_PIPELINE == None:
+        return value, label
+
+    progress = int(INFERENCE_PIPELINE.progress * 100)
+
+    return progress, f"{progress}%" if progress >= 5 else ""
 
 
 def main():
