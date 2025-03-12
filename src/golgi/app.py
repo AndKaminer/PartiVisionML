@@ -11,6 +11,7 @@ import time
 import csv
 import re
 import datetime
+import requests
 
 from dash import Dash, dcc, html, Input, Output, State, callback_context
 import dash_bootstrap_components as dbc
@@ -21,6 +22,7 @@ from ultralytics import YOLO
 import roboflow
 import cv2
 import plotly.graph_objects as go
+from tqdm import tqdm
 
 from golgi import settings
 from golgi.inference import InferencePipeline
@@ -32,6 +34,11 @@ from golgi.date_utils import parse_model_date, hasdate
 #############################################
 
 
+class BasicCallback():
+    def __init__(self):
+        self.value = 0
+
+
 MODELS_FOLDER = os.path.join(os.getcwd(), "models")
 LOCAL_MODEL_PATH = os.path.join(MODELS_FOLDER, settings.soft_get_setting("model_name", "NOTFOUND"))
 INFERENCE_PIPELINE = None
@@ -39,6 +46,7 @@ CANVAS_WIDTH = 400
 CANVAS_HEIGHT = 400
 MODEL_FOUND = False
 MODEL_PATH = None
+MODEL_DOWNLOAD_PROGRESS = BasicCallback()
 
 
 def get_most_recent_model(repo_id, token):
@@ -70,11 +78,17 @@ def ensure_model_exists(repo_id, token):
             print(e)
             raise Exception("Couldn't find a model to download. Check your huggingface information.")
 
-        downloaded_file = huggingface_hub.hf_hub_download(
-                repo_id=repo_id,
-                filename=most_recent_model,
-                token=token,
-                local_dir=MODELS_FOLDER)
+       # downloaded_file = huggingface_hub.hf_hub_download(
+       #         repo_id=repo_id,
+       #         filename=most_recent_model,
+       #         token=token,
+       #         local_dir=MODELS_FOLDER)
+
+        downloaded_file = custom_hub_download(repo_id=repo_id,
+                                             filename=most_recent_model,
+                                             token=token,
+                                             local_dir=MODELS_FOLDER,
+                                             callback=MODEL_DOWNLOAD_PROGRESS)
 
         MODEL_FOUND = True
         MODEL_PATH = os.path.join(MODELS_FOLDER, os.path.basename(most_recent_model))
@@ -387,6 +401,17 @@ app.layout = dbc.Container([
         dbc.Col([
             html.Div(id="submit-message", className="mt-3", style={"color": "green", "fontWeight": "bold"})
         ], width=12)
+    ]),
+
+    # MODEL STATUS SECTION
+    dbc.Row([
+        dbc.Col([
+            html.H5("Model Status", className="mt-4"),
+            dbc.Col([
+                dbc.Progress(id="download-progress", value=0, striped=True, animated=True, style={"height":"30px"}, label="Download not started"),
+                dcc.Interval(id="download-interval", n_intervals=0, interval=500)
+            ], width=7),
+        ])
     ]),
 
 
@@ -879,13 +904,62 @@ def run_tracking(n_clicks, folder_path, export_values, frame_rate, um_per_pixel,
     Input("progress-interval", "n_intervals"),
     Input("tracking-progress", "value"),
     Input("tracking-progress", "label"))
-def update_progress(n, value, label):
+def update_inference_progress(n, value, label):
     if INFERENCE_PIPELINE == None:
         return value, label
 
     progress = int(INFERENCE_PIPELINE.progress * 100)
 
     return progress, f"{progress}%" if progress >= 5 else ""
+
+@app.callback(
+        Output("download-progress", "value"),
+        Output("download-progress", "label"),
+        Input("download-interval", "n_intervals"),
+        Input("download-progress", "value"),
+        Input("download-progress", "value"))
+def update_download_progress(n, value, label):
+
+    progress = int(MODEL_DOWNLOAD_PROGRESS.value * 100)
+
+    return progress, f"{progress}%" if progress >= 5 else ""
+
+
+
+def custom_hub_download(repo_id, filename, token=None, local_dir=None, callback=None, revision=None):
+    url = huggingface_hub.hf_hub_url(repo_id=repo_id, filename=filename, revision=revision)
+
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+    response = requests.head(url, headers=headers, allow_redirects=True)
+    response.raise_for_status()  # Ensure the request was successful
+    file_size = int(response.headers.get('content-length', 0))
+
+    if local_dir is None:
+        local_dir = "."
+
+    local_file_path = f"{local_dir}/{filename}"
+    
+    if os.path.exists(local_file_path):
+        callback.value = 1
+        return 1
+
+    total = 0
+
+    with requests.get(url, headers=headers, stream=True) as r, open(local_file_path, 'wb') as f, tqdm(
+        desc=filename,
+        total=file_size,
+        unit='B',
+        unit_scale=True,
+        unit_divisor=1024,
+    ) as bar:
+        for chunk in r.iter_content(chunk_size=8192):
+            f.write(chunk)
+            bar.update(len(chunk))
+            total += len(chunk) / file_size
+            callback.value = total
+
+    return local_file_path
 
 
 def main():
