@@ -893,9 +893,9 @@ def run_tracking(n_clicks, folder_path, export_values, frame_rate, um_per_pixel,
 
     processed = run_tracking_on_folder(folder_path, export_values, frame_rate, um_per_pixel, repo_id, token)
     if not processed:
-        return "No videos processed. Check folder path or no .avi/.mp4 found."
+        return 0, "", "No videos processed. Check folder path or no .avi/.mp4 found."
 
-    return "All videos processed!"
+    return 0, "100%", "All videos processed!"
 
 
 @app.callback(
