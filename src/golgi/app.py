@@ -16,7 +16,7 @@ from dash import Dash, dcc, html, Input, Output, State, callback_context
 import dash_bootstrap_components as dbc
 from dash import dcc
 from dash.exceptions import PreventUpdate
-from huggingface_hub import hf_hub_download
+import huggingface_hub
 from ultralytics import YOLO
 import roboflow
 import cv2
@@ -25,7 +25,7 @@ import plotly.graph_objects as go
 from golgi import settings
 from golgi.inference import InferencePipeline
 from golgi.annotation import AnnotatedImage
-from date_utils import parse_model_date
+from golgi.date_utils import parse_model_date, hasdate
 
 #############################################
 # 1) Check / Download Model from Hugging Face
@@ -66,17 +66,18 @@ def ensure_model_exists(repo_id, token):
         os.makedirs(MODELS_FOLDER, exist_ok=True)
         try:
             most_recent_model = get_most_recent_model(repo_id, token)
-        except Exception:
+        except Exception as e:
+            print(e)
             raise Exception("Couldn't find a model to download. Check your huggingface information.")
 
-        downloaded_file = hf_hub_download(
+        downloaded_file = huggingface_hub.hf_hub_download(
                 repo_id=repo_id,
                 filename=most_recent_model,
                 token=token,
                 local_dir=MODELS_FOLDER)
 
         MODEL_FOUND = True
-        MODEL_PATH = os.path.join(MODELS_FOLDER, os.path.basename(most_recent_file))
+        MODEL_PATH = os.path.join(MODELS_FOLDER, os.path.basename(most_recent_model))
 
         print(f"Model downloaded and stored at {MODEL_PATH}")
 
@@ -649,7 +650,7 @@ def on_training_video_upload(contents):
     Input("btn-auto-detect", "n_clicks"),
     State("training-frames", "data"),
     State("huggingface-rep-id", "value"),
-    State("huggingface-token", "value")
+    State("huggingface-token", "value"),
     prevent_initial_call=True
 )
 def run_full_inference(n_clicks, frames, repo_id, token):
@@ -852,7 +853,7 @@ def save_annotation(n_clicks, api_key, workspace, project, frame_idx, frames, fi
     State("tracking-frame-rate", "value"),
     State("tracking-um-per-pixel", "value"), 
     State("huggingface-rep-id", "value"),
-    State("huggingface-token", "value")
+    State("huggingface-token", "value"),
     prevent_initial_call=True
 )
 def run_tracking(n_clicks, folder_path, export_values, frame_rate, um_per_pixel, repo_id, token):
