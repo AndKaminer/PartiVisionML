@@ -552,7 +552,7 @@ app.layout = dbc.Container([
                     dcc.Input(
                         id="tracking-folder-path",
                         type="text",
-                        placeholder=r"C:\my_videos",
+                        placeholder=r"Enter Video Folder Path",
                         className="form-control",
                         value=settings.soft_get_setting("video_folder")
                     )
@@ -562,7 +562,7 @@ app.layout = dbc.Container([
                     dcc.Input(
                         id="tracking-frame-rate",
                         type="number",
-                        placeholder="25",
+                        placeholder="Enter Frametrate",
                         className="form-control",
                         value=settings.soft_get_setting("framerate")
                     )
@@ -572,7 +572,7 @@ app.layout = dbc.Container([
                     dcc.Input(
                         id="tracking-um-per-pixel",
                         type="number",
-                        placeholder="1.0",
+                        placeholder="Enter Scaling Factor",
                         className="form-control",
                         value=settings.soft_get_setting("um_per_pixel")
                     )
