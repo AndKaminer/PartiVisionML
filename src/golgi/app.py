@@ -378,7 +378,6 @@ app.layout = dbc.Container([
                       value=settings.soft_get_setting("huggingface_repo_id")),
             dbc.Input(id="huggingface-token", placeholder="Enter Huggingface Token", type="text", className="mb-3",
                       value=settings.soft_get_setting("huggingface_token")),
-            dbc.Button("Submit Huggingface", id="huggingface-submit", color="primary")
         ], width=6),
         
         # Roboflow section
@@ -392,7 +391,6 @@ app.layout = dbc.Container([
                       value=settings.soft_get_setting("roboflow_project_name")),
             dbc.Input(id="roboflow-version", placeholder="Enter Roboflow Version", type="text", className="mb-3",
                       value=settings.soft_get_setting("roboflow_version_number")),
-            dbc.Button("Submit Roboflow", id="roboflow-submit", color="primary")
         ], width=6),
     ]),
 
