@@ -50,7 +50,8 @@ def get_setting(setting_name):
     return settings[setting_name]
 
 def soft_get_setting(setting_name, default=None):
-    return settings.get(setting_name, default)
+    out = settings.get(setting_name, default)
+    return out if out is not None else default
 
 def get_settings_path(settings_path_path):
     try:

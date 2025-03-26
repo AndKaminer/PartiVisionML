@@ -963,7 +963,7 @@ def custom_hub_download(repo_id, filename, token=None, local_dir=None, callback=
 
 
 def main():
-    app.run_server(debug=True)
+    app.run(debug=True)
 
 if __name__ == "__main__":
     main()
