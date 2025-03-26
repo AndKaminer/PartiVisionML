@@ -515,7 +515,7 @@ app.layout = dbc.Container([
                             dragmode="drawclosedpath", 
                             plot_bgcolor="white",
                             paper_bgcolor="white",
-                            newshape=dict(line=dict(color="red", width=1)),
+                            newshape=dict(fillcolor="red", opacity=0.5, line=dict(color="red", width=3)),
                         )
                     )
                 ], width=12)
@@ -755,7 +755,7 @@ def run_full_inference(n_clicks, frames, repo_id, token):
     Input("no-contour-dropdown", "value"),
     State("training-frames", "data"),
     State("processed-frames", "data"),
-    State("annotation-graph", "relayoutData"),
+    Input("annotation-graph", "relayoutData"),
     State("no-contour-indices", "data"),
     prevent_initial_call=True
 )
@@ -772,6 +772,8 @@ def update_annotation_display(slider_value, dropdown_value, training_frames, pro
         frame_idx = slider_value
 
     frame_idx = max(0, min(len(training_frames) - 1, frame_idx))
+    if not training_frames:
+        return go.Figure(), frame_idx, {}
     
 
     if no_contour_indices and frame_idx in no_contour_indices:
@@ -820,6 +822,9 @@ def update_annotation_display(slider_value, dropdown_value, training_frames, pro
         plot_bgcolor="white",
         paper_bgcolor="white"
     )
+
+    print(fig)
+
 
     return fig, frame_idx, {}
 
