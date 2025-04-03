@@ -4,13 +4,13 @@ Computer Vision Package for Microfluidics. For more information, contact akamine
 
 Set up a virtual environment using python's venv functionality. See [this](https://docs.python.org/3/library/venv.html) link. Inside the virtual environment, install the package with pip. Then, you should have access to the commands listed below.
 ```
-    pip install --upgrade golgi-cell-cv
+    pip install --upgrade partivisionML
 ```
 
 # Running HTML Dash App
 
 ```
-    from golgi import app
+    from partivision import app
     app.run()
 ```
 
@@ -23,15 +23,15 @@ Set up a virtual environment using python's venv functionality. See [this](https
 Upon installing the package, you will have access to the commands listed above.
 To get things set up, you will likely want access to a computer vision model.
 Reference the huggingface repository to see all of the available weights. Then
-use the golgi-download-weights command to download the correct weights. To
-check what weights you have available, you can use the golgi-weights-list command.
+use the pv-download-weights command to download the correct weights. To
+check what weights you have available, you can use the pv-weights-list command.
 
 ## Automatic Annotation
 
-Use the golgi-annotate command like this:
+Use the pv-annotate command like this:
 
 ```
-    golgi-annotate auto {PATH TO IMAGE} -m {MODEL YOU WANT TO USE (SEE golgi-weights-list)} -k {ROBOFLOW API KEY}
+    pv-annotate auto {PATH TO IMAGE} -m {MODEL YOU WANT TO USE (SEE pv-weights-list)} -k {ROBOFLOW API KEY}
 ```
 The roboflow API key can either be supplied at the beginning with the -k argument or 
 at the end of the process.
@@ -49,10 +49,10 @@ supply your API key as an argument, you will be asked for your API key.
 
 ## Manual Annotation
 
-Use the golgi-annotate command like this:
+Use the pv-annotate command like this:
 
 ```
-    golgi-annotate manual {PATH TO IMAGE} -k {ROBOFLOW API_KEY}
+    pv-annotate manual {PATH TO IMAGE} -k {ROBOFLOW API_KEY}
 ```
 
 The roboflow API key can either be supplied at the beginning with the -k argument or 
