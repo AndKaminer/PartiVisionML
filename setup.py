@@ -4,7 +4,7 @@ with open("README.md", "r") as f:
     description = f.read()
 
 setup(
-    name="golgi-cell-cv",
+    name="partivisionML",
     version="0.15",
     packages=find_packages(where="src"),
     package_dir= {"": "src"},
@@ -26,8 +26,8 @@ setup(
         'dash-bootstrap-components'
     ],
     entry_points={
-        'console_scripts': ["golgi-app = partivision.app:main",
-                            "golgi-set-settings = partivision.settings:set_new_settings_file",
-                            "golgi-get-settings-path = partivision.settings:print_settings_file_path",
-                            "golgi-get-setting = partivision.settings:print_setting"]}
+        'console_scripts': ["pv-app = partivision.app:main",
+                            "pv-set-settings = partivision.settings:set_new_settings_file",
+                            "pv-get-settings-path = partivision.settings:print_settings_file_path",
+                            "pv-get-setting = partivision.settings:print_setting"]}
 )

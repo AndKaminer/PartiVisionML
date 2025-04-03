@@ -24,10 +24,10 @@ import cv2
 import plotly.graph_objects as go
 from tqdm import tqdm
 
-from golgi import settings
-from golgi.inference import InferencePipeline
-from golgi.annotation import AnnotatedImage
-from golgi.date_utils import parse_model_date, hasdate
+from partivision import settings
+from partivision.inference import InferencePipeline
+from partivision.annotation import AnnotatedImage
+from partivision.date_utils import parse_model_date, hasdate
 
 #############################################
 # 1) Check / Download Model from Hugging Face
