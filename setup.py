@@ -10,7 +10,7 @@ setup(
     package_dir= {"": "src"},
     package_data= {"": ["*/.gitkeep", "*/default_settings.json"]},
     description=description,
-    url="https://github.com/AndKaminer/golgi",
+    url="https://github.com/AndKaminer/PartiVisionML",
     author="Andrew Kaminer",
     author_email="akaminer@gatech.edu",
     install_requires=[
