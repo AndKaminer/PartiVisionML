@@ -1,4 +1,4 @@
-from golgi.inference import InferencePipeline, WeightManager, Configs
+from partivision.inference import InferencePipeline, WeightManager, Configs
 
 VIDEO_PATH = ""
 

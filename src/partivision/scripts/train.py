@@ -1,6 +1,6 @@
-from golgi.training import Trainer
-from golgi.training import Configs as TrainConfigs
-from golgi.inference import WeightsManager
+from partivision.training import Trainer
+from partivision.training import Configs as TrainConfigs
+from partivision.inference import WeightsManager
 
 import argparse
 

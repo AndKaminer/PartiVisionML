@@ -165,11 +165,11 @@ cython_debug/
 #.idea/
 
 /.idea/.gitignore
-/.idea/golgi.iml
+/.idea/partivision.iml
 /.idea/misc.xml
 /.idea/modules.xml
 /.idea/inspectionProfiles/profiles_settings.xml
-/src/golgi/weights/sep13.pt
+/src/partivision/weights/*
 /.idea/vcs.xml
 
 

@@ -1,4 +1,4 @@
-from golgi.annotation import AnnotatedImage, AutoAnnotater
+from partivision.annotation import AnnotatedImage, AutoAnnotater
 
 import argparse
 import os
