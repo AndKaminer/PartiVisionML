@@ -755,7 +755,7 @@ def run_full_inference(n_clicks, frames, repo_id, token):
     Input("no-contour-dropdown", "value"),
     State("training-frames", "data"),
     State("processed-frames", "data"),
-    Input("annotation-graph", "relayoutData"),
+    State("annotation-graph", "relayoutData"),
     State("no-contour-indices", "data"),
     prevent_initial_call=True
 )
@@ -805,7 +805,6 @@ def update_annotation_display(slider_value, dropdown_value, training_frames, pro
         )
     )
 
-
     if relayout_data and "xaxis.range" in relayout_data and "yaxis.range" in relayout_data:
         x_range = relayout_data["xaxis.range"]
         y_range = relayout_data["yaxis.range"]
@@ -822,8 +821,6 @@ def update_annotation_display(slider_value, dropdown_value, training_frames, pro
         plot_bgcolor="white",
         paper_bgcolor="white"
     )
-
-    print(fig)
 
 
     return fig, frame_idx, {}
