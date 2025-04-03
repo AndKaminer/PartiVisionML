@@ -5,7 +5,7 @@ with open("README.md", "r") as f:
 
 setup(
     name="golgi-cell-cv",
-    version="0.14",
+    version="0.15",
     packages=find_packages(where="src"),
     package_dir= {"": "src"},
     package_data= {"": ["*/.gitkeep", "*/default_settings.json"]},
