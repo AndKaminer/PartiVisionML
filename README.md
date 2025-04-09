@@ -10,8 +10,13 @@ Set up a virtual environment using python's venv functionality. See [this](https
 # Running HTML Dash App
 
 ```
-    from partivision import app
+    from partivision.app import app
     app.run()
+```
+
+Alternatively, use the pv-app command like this
+```
+    pv-app
 ```
 
 
