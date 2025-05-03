@@ -11,9 +11,9 @@
 
 
     "framerate" : null,
-    "scalng_factor" : null,
+    "scalng_factor" : 3,
     "um_per_pixel" : null,
-    "window_width" : null,
+    "window_width" : 150,
     "scatter" : null,
     "verbose" : null,
 

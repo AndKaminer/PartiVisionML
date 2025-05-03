@@ -678,9 +678,10 @@ def on_training_video_upload(contents):
     State("training-frames", "data"),
     State("huggingface-rep-id", "value"),
     State("huggingface-token", "value"),
+    State("tracking-um-per-pixel", "value")
     prevent_initial_call=True
 )
-def run_full_inference(n_clicks, frames, repo_id, token):
+def run_full_inference(n_clicks, frames, repo_id, token, um_per_pixel):
     if not frames:
         raise PreventUpdate
 
@@ -706,7 +707,7 @@ def run_full_inference(n_clicks, frames, repo_id, token):
         framerate=fps,
         window_width=settings.soft_get_setting("window_width"),
         scaling_factor=settings.soft_get_setting("scaling_factor"),
-        um_per_pixel=settings.soft_get_setting("um_per_pixel"),
+        um_per_pixel=um_per_pixel,
         output_folder=output_folder
     )
 
