@@ -5,7 +5,7 @@ with open("README.md", "r") as f:
 
 setup(
     name="partivisionML",
-    version="0.16",
+    version="0.17",
     packages=find_packages(where="src"),
     package_dir= {"": "src"},
     package_data= {"": ["*/.gitkeep", "*/default_settings.json"]},

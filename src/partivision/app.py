@@ -678,7 +678,7 @@ def on_training_video_upload(contents):
     State("training-frames", "data"),
     State("huggingface-rep-id", "value"),
     State("huggingface-token", "value"),
-    State("tracking-um-per-pixel", "value")
+    State("tracking-um-per-pixel", "value"),
     prevent_initial_call=True
 )
 def run_full_inference(n_clicks, frames, repo_id, token, um_per_pixel):
