@@ -12,6 +12,7 @@ import csv
 import re
 import datetime
 import requests
+import torch
 
 from dash import Dash, dcc, html, Input, Output, State, callback_context
 import dash_bootstrap_components as dbc
@@ -128,7 +129,11 @@ def run_tracking_on_folder(folder_path, output_types, frame_rate, um_per_pixel, 
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = YOLO(ensure_model_exists(repo_id, token))
+    model.to(device)
+    
+
 
     avi = "AVI" in output_types
     csv = "CSV" in output_types
@@ -365,52 +370,83 @@ app.title = "Particle Tracking Dashboard"
 app.layout = dbc.Container([
     dbc.Row([
         dbc.Col([
-            html.H2("Particle Tracking Interface", className="text-black mt-3"),
+            html.H2("PartiVision ML Dashborard", className="text-black mt-3"),
             html.Hr()
         ], width=12)
     ]),
 
-    # Huggingface section
-    dbc.Row([
-        dbc.Col([
-            html.H5("Huggingface Details", className="mt-4"),
-            dbc.Input(id="huggingface-rep-id", placeholder="Enter Huggingface Rep ID", type="text", className="mb-3",
-                      value=settings.soft_get_setting("huggingface_repo_id")),
-            dbc.Input(id="huggingface-token", placeholder="Enter Huggingface Token", type="text", className="mb-3",
-                      value=settings.soft_get_setting("huggingface_token")),
-        ], width=6),
-        
-        # Roboflow section
-        dbc.Col([
-            html.H5("Roboflow Details", className="mt-4"),
-            dbc.Input(id="roboflow-api-key", placeholder="Enter Roboflow API Key", type="text", className="mb-3",
-                      value=settings.soft_get_setting("roboflow_api_key")),
-            dbc.Input(id="roboflow-workspace", placeholder="Enter Roboflow Workspace", type="text", className="mb-3",
-                      value=settings.soft_get_setting("roboflow_workspace_name")),
-            dbc.Input(id="roboflow-project-id", placeholder="Enter Roboflow Project ID", type="text", className="mb-3",
-                      value=settings.soft_get_setting("roboflow_project_name")),
-            dbc.Input(id="roboflow-version", placeholder="Enter Roboflow Version", type="text", className="mb-3",
-                      value=settings.soft_get_setting("roboflow_version_number")),
-        ], width=6),
-    ]),
+    
+    # SETTINGS
+    dbc.Card([
+        dbc.CardHeader(html.H4("Settings", className="text-black mb-0")),
+        dbc.CardBody([
 
-    # Message after submission
-    dbc.Row([
-        dbc.Col([
-            html.Div(id="submit-message", className="mt-3", style={"color": "green", "fontWeight": "bold"})
-        ], width=12)
-    ]),
+            dbc.Row([
+                dbc.Col([
+                    html.H5("Huggingface Details", className="mt-2"),
+                    
+                    dbc.Input(id="huggingface-rep-id", placeholder="Enter Huggingface Rep ID", type="text", className="mb-3",
+                            value=settings.soft_get_setting("huggingface_repo_id")),
+                    
+                    dbc.Input(id="huggingface-token", placeholder="Enter Huggingface Token", type="text", className="mb-3",
+                            value=settings.soft_get_setting("huggingface_token")),
+                    
+                    html.Div(style={"height": "6px"}),  # subtle spacing before model status
 
-    # MODEL STATUS SECTION
-    dbc.Row([
-        dbc.Col([
-            html.H5("Model Status", className="mt-4"),
-            dbc.Col([
-                dbc.Progress(id="download-progress", value=0, striped=True, animated=True, style={"height":"30px"}, label="Download not started"),
-                dcc.Interval(id="download-interval", n_intervals=0, interval=500)
-            ], width=7),
+                    html.Div([
+                        html.Label("Model Status", className="fw-bold mb-2"),
+                        dbc.Progress(id="download-progress", value=0, striped=True, animated=True, style={"height": "30px"},
+                                    label="Download not started"),
+                        dcc.Interval(id="download-interval", n_intervals=0, interval=500)
+                    ], className="mb-3")
+                ], width=6),
+
+                dbc.Col([
+                    html.H5("Roboflow Details", className="mt-2"),
+                    dbc.Input(id="roboflow-api-key", placeholder="Enter Roboflow API Key", type="text", className="mb-3",
+                            value=settings.soft_get_setting("roboflow_api_key")),
+                    dbc.Input(id="roboflow-workspace", placeholder="Enter Roboflow Workspace", type="text", className="mb-3",
+                            value=settings.soft_get_setting("roboflow_workspace_name")),
+                    dbc.Input(id="roboflow-project-id", placeholder="Enter Roboflow Project ID", type="text", className="mb-3",
+                            value=settings.soft_get_setting("roboflow_project_name")),
+                    dbc.Input(id="roboflow-version", placeholder="Enter Roboflow Version", type="text", className="mb-3",
+                            value=settings.soft_get_setting("roboflow_version_number")),
+                ], width=6),
+            ]),
+                   
+            html.Hr(),
+
+            dbc.Row([
+                dbc.Col([
+                    html.H5("Input Video Details", className="mt-2")
+                ], width=6)
+            ]),
+
+            dbc.Row([
+                dbc.Col([
+                    html.Label("Frame Rate (μs/frame)", className="fw-bold"),
+                    dcc.Input(
+                        id="tracking-frame-rate",
+                        type="number",
+                        placeholder="Enter Frametrate",
+                        className="form-control",
+                        value=settings.soft_get_setting("framerate")
+                    )
+                ], width=6),
+                dbc.Col([
+                    html.Label("Pixel Size (μm/pixel)", className="fw-bold"),
+                    dcc.Input(
+                        id="tracking-um-per-pixel",
+                        type="number",
+                        placeholder="Enter Scaling Factor",
+                        className="form-control",
+                        value=settings.soft_get_setting("um_per_pixel")
+                    )
+                ], width=6),
+            ], className="mb-3"),
+            
         ])
-    ]),
+    ], className="my-3"),
 
 
     # TRAINING SECTION
@@ -506,7 +542,7 @@ app.layout = dbc.Container([
                             "displaylogo": False  
                             
                         },
-                        style={"width": "100%", "height": "250px", "border": "1px solid gray"},
+                        style={"width": "100%", "height": "250px", "border": "1px solid #ced4da", "borderRadius": "6px","padding": "4px"},
                         figure=go.Figure().update_layout(
                             autosize=True,
                             xaxis=dict(visible=False, showgrid=False, zeroline=False),
@@ -535,10 +571,9 @@ app.layout = dbc.Container([
 ]),
 
 
-
-
-        ])
+       ])
     ], className="my-3"),
+
 
     # TRACKING SECTION
     dbc.Card([
@@ -554,27 +589,8 @@ app.layout = dbc.Container([
                         className="form-control",
                         value=settings.soft_get_setting("video_folder")
                     )
-                ], width=6),
-                dbc.Col([
-                    html.Label("Frame Rate (μs/frame)", className="fw-bold"),
-                    dcc.Input(
-                        id="tracking-frame-rate",
-                        type="number",
-                        placeholder="Enter Frametrate",
-                        className="form-control",
-                        value=settings.soft_get_setting("framerate")
-                    )
-                ], width=3),
-                dbc.Col([
-                    html.Label("Pixel Size (μm/pixel)", className="fw-bold"),
-                    dcc.Input(
-                        id="tracking-um-per-pixel",
-                        type="number",
-                        placeholder="Enter Scaling Factor",
-                        className="form-control",
-                        value=settings.soft_get_setting("um_per_pixel")
-                    )
-                ], width=3),
+                ], width=12),
+                
             ], className="mb-3"),
 
             dbc.Row([
@@ -953,6 +969,7 @@ def custom_hub_download(repo_id, filename, token=None, local_dir=None, callback=
         unit='B',
         unit_scale=True,
         unit_divisor=1024,
+        disable=True
     ) as bar:
         for chunk in r.iter_content(chunk_size=8192):
             f.write(chunk)
