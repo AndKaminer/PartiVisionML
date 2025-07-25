@@ -23,7 +23,8 @@ class ProcessedImage:
                 'height' : 0,
                 'circularity' : 0,
                 'ypos': 0,
-                'centerX' : None}
+                'centerX' : None,
+                'taylor': 0}
         
         self.contour = None
         self.contour = self.get_contour()
@@ -39,7 +40,7 @@ class ProcessedImage:
         binary_image_dip.Convert('BIN')
 
         labeled_image = dip.Label(binary_image_dip)
-        measurement = dip.MeasurementTool.Measure(labeled_image, features=['Perimeter', 'SolidArea', 'Roundness'])
+        measurement = dip.MeasurementTool.Measure(labeled_image, features=['Perimeter', 'SolidArea', 'Roundness', 'Inertia'])
 
         return measurement
 
@@ -67,6 +68,14 @@ class ProcessedImage:
         self.data['perimeter'] = measurement['Perimeter'][1][0] * self.um_per_pixel / self.scaling_factor
         self.data['area'] = measurement['SolidArea'][1][0] * pow(self.um_per_pixel, 2) / pow(self.scaling_factor, 2)
         self.data['circularity'] = measurement['Roundness'][1][0]
+        minor_axis = None
+        major_axis = None
+        for obj in measurement['Inertia']:
+            major_axis = obj[0]
+            minor_axis = obj[1]
+
+        taylor_param = (major_axis - minor_axis) / (major_axis + minor_axis)
+        self.data['taylor'] = taylor_param
 
 
     def get_contour(self):

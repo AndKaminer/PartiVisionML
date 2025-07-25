@@ -16,6 +16,8 @@ class DataHandler:
             "acceleration": [],
             "circularity": [],
             "ypos": [],
+            "xpos": [],
+            "taylor": [],
             "time": []}
 
         self.prev_data = {
@@ -26,9 +28,11 @@ class DataHandler:
             'acceleration' : 0,
             'circularity' : 0,
             'ypos': 0,
+            'xpos': 0,
+            'taylor': 0,
             'centerX' : None}
 
-        self.plot = UpdateablePlot(6, 3.2, 'scatter') if scatter else UpdateablePlot(7, 3.2, 'plot')
+        self.plot = UpdateablePlot(9, 3.2, 'scatter') if scatter else UpdateablePlot(9, 3.2, 'plot')
         self.plot.set_subplot_chars(0, "Area", "Time (μs)", "Area (μm^2)")
         self.plot.set_subplot_chars(1, "Perimeter", "Time (μs)",  "Perimeter (μm)")
         self.plot.set_subplot_chars(2, "Height", "Time (μs)", "Height (μm)")
@@ -36,9 +40,11 @@ class DataHandler:
         self.plot.set_subplot_chars(4, "Acceleration", "Time (μs)", "Acceleration (μm/s^2)")
         self.plot.set_subplot_chars(5, "Circularity", "Time (μs)", "Circularity")
         self.plot.set_subplot_chars(6, "Y-Position", "Time (μs)", "Y-Position (μm/s^2)")
+        self.plot.set_subplot_chars(7, "X-Position", "Time (μs)", "X-Position (μs/s^2)")
+        self.plot.set_subplot_chars(8, "Taylor Parameter", "Time (μs)", "Taylor Parameter")
 
 
-    def update_data(self, area, perimeter, height, circularity, ypos, centerX=None):
+    def update_data(self, area, perimeter, height, circularity, ypos, taylor, centerX=None):
 
         self.time += self.deltatime
         self.data['time'].append(self.time)
@@ -49,6 +55,8 @@ class DataHandler:
             velocity = 0
 
         acceleration = (velocity - self.prev_data['velocity']) / self.deltatime
+
+        xpos = 0 if centerX is None else centerX
 
         self.data['area'].append(area)
         self.prev_data['area'] = area
@@ -64,6 +72,10 @@ class DataHandler:
         self.prev_data['circularity'] = circularity
         self.data["ypos"].append(ypos)
         self.prev_data["ypos"] = ypos
+        self.data["xpos"].append(xpos)
+        self.prev_data["xpos"] = xpos # stupid but trying to get around a breaking change
+        self.data["taylor"].append(taylor)
+        self.prev_data["taylor"] = taylor
         self.prev_data['centerX'] = centerX
 
         self.__update_plot()
@@ -81,3 +93,5 @@ class DataHandler:
         self.plot.update_subplot(4, self.time, self.data['acceleration'][-1], .1)
         self.plot.update_subplot(5, self.time, self.data['circularity'][-1], .1)
         self.plot.update_subplot(6, self.time, self.data['ypos'][-1], .1)
+        self.plot.update_subplot(7, self.time, self.data['xpos'][-1], .1)
+        self.plot.update_subplot(8, self.time, self.data['taylor'][-1], .1)

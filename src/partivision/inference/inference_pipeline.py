@@ -80,6 +80,7 @@ class InferencePipeline:
                         height=img.get_parameter('height'),
                         circularity=img.get_parameter('circularity'),
                         ypos=img.get_parameter('ypos'),
+                        taylor=img.get_parameter('taylor'),
                         centerX=img.get_parameter('centerX'))
 
             if dh.prev_data['centerX']:
